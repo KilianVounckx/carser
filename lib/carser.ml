@@ -1,4 +1,6 @@
 type 'a parse_result = ('a, string) Result.t
+type 'a parser = { parse : string -> ('a * string) parse_result }
+type 'a t = 'a parser
 
 let pp_parse_result pp_ok oc = function
   | Ok (x, rest) -> Printf.fprintf oc "Ok(%a, \"%s\")" pp_ok x rest
@@ -14,7 +16,7 @@ let pchar expected =
     then Ok (String.get input 0, String.sub input 1 (length - 1))
     else Error (Printf.sprintf "expected %c, got %c" expected (String.get input 0))
   in
-  parse_fn
+  { parse = parse_fn }
 ;;
 
 let pp_char oc c = Printf.fprintf oc "%c" c
@@ -22,7 +24,7 @@ let pp_char oc c = Printf.fprintf oc "%c" c
 let%expect_test "abc" =
   let input = "abc" in
   let parse_a = pchar 'a' in
-  let result = parse_a input in
+  let result = parse_a.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
   [%expect {| Ok(a, "bc") |}]
 ;;
@@ -30,7 +32,7 @@ let%expect_test "abc" =
 let%expect_test "zbc" =
   let input = "zbc" in
   let parse_a = pchar 'a' in
-  let result = parse_a input in
+  let result = parse_a.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
   [%expect {| Error("expected a, got z") |}]
 ;;
@@ -38,7 +40,7 @@ let%expect_test "zbc" =
 let%expect_test "" =
   let input = "" in
   let parse_a = pchar 'a' in
-  let result = parse_a input in
+  let result = parse_a.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
   [%expect {| Error("no more input") |}]
 ;;
