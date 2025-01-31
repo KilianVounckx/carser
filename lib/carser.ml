@@ -16,6 +16,11 @@ let fail message =
   { parse = parse_fn }
 ;;
 
+let const x =
+  let parse_fn input = Ok (x, input) in
+  { parse = parse_fn }
+;;
+
 let pchar expected =
   let parse_fn input =
     let length = String.length input in
@@ -30,6 +35,27 @@ let pchar expected =
 
 (* Parser combinators *)
 
+let map f parser =
+  let parse_fn input =
+    let ( let+ ) = Fun.flip Result.map in
+    let+ value, rest = parser.parse input in
+    f value, rest
+  in
+  { parse = parse_fn }
+;;
+
+let ( let+ ) x f = map f x
+
+let ( and+ ) parser1 parser2 =
+  let parse_fn input =
+    let ( let* ) = Result.bind in
+    let* x, rest1 = parser1.parse input in
+    let* y, rest2 = parser2.parse rest1 in
+    Ok ((x, y), rest2)
+  in
+  { parse = parse_fn }
+;;
+
 let ( >> ) parser1 parser2 =
   let parse_fn input =
     let ( let* ) = Result.bind in
@@ -38,6 +64,15 @@ let ( >> ) parser1 parser2 =
     Ok ((value1, value2), rest2)
   in
   { parse = parse_fn }
+;;
+
+let rec sequence parsers =
+  match parsers with
+  | [] -> const []
+  | phead :: ptail ->
+    let+ head = phead
+    and+ tail = sequence ptail in
+    head :: tail
 ;;
 
 let ( <|> ) parser1 parser2 =
@@ -53,6 +88,16 @@ let choice parsers = List.fold_left ( <|> ) (fail "no choice") parsers
 let any_of chars = chars |> List.map pchar |> choice
 
 (* Tests *)
+
+let pp_list pp_elem oc list =
+  Printf.fprintf oc "[";
+  List.iteri
+    (fun index elem ->
+       if index != 0 then Printf.fprintf oc ", ";
+       Printf.fprintf oc "%a" pp_elem elem)
+    list;
+  Printf.fprintf oc "]"
+;;
 
 let pp_pair pp_left pp_right oc (x, y) = Printf.fprintf oc "(%a, %a)" pp_left x pp_right y
 let pp_char oc c = Printf.fprintf oc "'%c'" c
@@ -199,4 +244,36 @@ let%expect_test "lowercase | fail" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
   [%expect {| Error("expected z, got A") |}]
+;;
+
+let%expect_test "sequence | success" =
+  let input = "abcz" in
+  let parser = sequence [ pchar 'a'; pchar 'b'; pchar 'c' ] in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Ok(['a', 'b', 'c'], "z") |}]
+;;
+
+let%expect_test "sequence | fail a" =
+  let input = "zzzz" in
+  let parser = sequence [ pchar 'a'; pchar 'b'; pchar 'c' ] in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Error("expected a, got z") |}]
+;;
+
+let%expect_test "sequence | fail b" =
+  let input = "azzz" in
+  let parser = sequence [ pchar 'a'; pchar 'b'; pchar 'c' ] in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Error("expected b, got z") |}]
+;;
+
+let%expect_test "sequence | fail c" =
+  let input = "abzz" in
+  let parser = sequence [ pchar 'a'; pchar 'b'; pchar 'c' ] in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Error("expected c, got z") |}]
 ;;
