@@ -104,6 +104,12 @@ let many parser =
   { parse = parse_fn }
 ;;
 
+let some parser =
+  let+ first = parser
+  and+ rest = many parser in
+  first :: rest
+;;
+
 (* Tests *)
 
 let pp_list pp_elem oc list =
@@ -334,4 +340,36 @@ let%expect_test "many a | success 0" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
   [%expect {| Ok([], "zzzz") |}]
+;;
+
+let%expect_test "some a | success 3" =
+  let input = "aaaz" in
+  let parser = some (char 'a') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Ok(['a', 'a', 'a'], "z") |}]
+;;
+
+let%expect_test "some a | success 2" =
+  let input = "aazz" in
+  let parser = some (char 'a') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Ok(['a', 'a'], "zz") |}]
+;;
+
+let%expect_test "some a | success 1" =
+  let input = "azzz" in
+  let parser = some (char 'a') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Ok(['a'], "zzz") |}]
+;;
+
+let%expect_test "some a | fail" =
+  let input = "zzzz" in
+  let parser = some (char 'a') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Error("expected a, got z") |}]
 ;;
