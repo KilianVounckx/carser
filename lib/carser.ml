@@ -35,6 +35,15 @@ let ( >> ) parser1 parser2 =
   { parse = parse_fn }
 ;;
 
+let ( <|> ) parser1 parser2 =
+  let parse_fn input =
+    match parser1.parse input with
+    | Ok x -> Ok x
+    | Error _ -> parser2.parse input
+  in
+  { parse = parse_fn }
+;;
+
 (* Tests *)
 
 let pp_pair pp_left pp_right oc (x, y) = Printf.fprintf oc "(%a, %a)" pp_left x pp_right y
@@ -93,5 +102,37 @@ let%expect_test "a then b | empty" =
   let parser = pchar 'a' >> pchar 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
+  [%expect {| Error("no more input") |}]
+;;
+
+let%expect_test "a or b | success a" =
+  let input = "azz" in
+  let parser = pchar 'a' <|> pchar 'b' in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_char) result;
+  [%expect {| Ok('a', "zz") |}]
+;;
+
+let%expect_test "a or b | success b" =
+  let input = "bzz" in
+  let parser = pchar 'a' <|> pchar 'b' in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_char) result;
+  [%expect {| Ok('b', "zz") |}]
+;;
+
+let%expect_test "a or b | fail" =
+  let input = "zzz" in
+  let parser = pchar 'a' <|> pchar 'b' in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_char) result;
+  [%expect {| Error("expected b, got z") |}]
+;;
+
+let%expect_test "a or b | empty" =
+  let input = "" in
+  let parser = pchar 'a' <|> pchar 'b' in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_char) result;
   [%expect {| Error("no more input") |}]
 ;;
