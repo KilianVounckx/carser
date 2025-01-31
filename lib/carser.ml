@@ -5,13 +5,16 @@ let pp_parse_result pp_ok oc = function
   | Error message -> Printf.fprintf oc "Error(\"%s\")" message
 ;;
 
-let pchar expected input =
-  let length = String.length input in
-  if length == 0
-  then Error "no more input"
-  else if String.get input 0 == expected
-  then Ok (String.get input 0, String.sub input 1 (length - 1))
-  else Error (Printf.sprintf "expected %c, got %c" expected (String.get input 0))
+let pchar expected =
+  let parse_fn input =
+    let length = String.length input in
+    if length == 0
+    then Error "no more input"
+    else if String.get input 0 == expected
+    then Ok (String.get input 0, String.sub input 1 (length - 1))
+    else Error (Printf.sprintf "expected %c, got %c" expected (String.get input 0))
+  in
+  parse_fn
 ;;
 
 let pp_char oc c = Printf.fprintf oc "%c" c
