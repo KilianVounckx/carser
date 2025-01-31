@@ -37,15 +37,15 @@ let ( >> ) parser1 parser2 =
 
 (* Tests *)
 
-let pp_char oc c = Printf.fprintf oc "%c" c
 let pp_pair pp_left pp_right oc (x, y) = Printf.fprintf oc "(%a, %a)" pp_left x pp_right y
+let pp_char oc c = Printf.fprintf oc "'%c'" c
 
 let%expect_test "a | success" =
   let input = "abc" in
   let parse_a = pchar 'a' in
   let result = parse_a.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
-  [%expect {| Ok(a, "bc") |}]
+  [%expect {| Ok('a', "bc") |}]
 ;;
 
 let%expect_test "a | fail" =
@@ -69,7 +69,7 @@ let%expect_test "a then b | success" =
   let parser = pchar 'a' >> pchar 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
-  [%expect {| Ok((a, b), "c") |}]
+  [%expect {| Ok(('a', 'b'), "c") |}]
 ;;
 
 let%expect_test "a then b | fail a" =
