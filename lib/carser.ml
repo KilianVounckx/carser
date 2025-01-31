@@ -87,6 +87,11 @@ let ( <|> ) parser1 parser2 =
 let choice parsers = List.fold_left ( <|> ) (fail "no choice") parsers
 let any_of chars = chars |> List.map pchar |> choice
 
+let pstring string =
+  let+ chars = string |> String.to_seq |> Seq.map pchar |> List.of_seq |> sequence in
+  chars |> List.to_seq |> String.of_seq
+;;
+
 (* Tests *)
 
 let pp_list pp_elem oc list =
@@ -100,6 +105,7 @@ let pp_list pp_elem oc list =
 ;;
 
 let pp_pair pp_left pp_right oc (x, y) = Printf.fprintf oc "(%a, %a)" pp_left x pp_right y
+let pp_string oc s = Printf.fprintf oc "\"%s\"" s
 let pp_char oc c = Printf.fprintf oc "'%c'" c
 
 let%expect_test "a | success" =
@@ -276,4 +282,12 @@ let%expect_test "sequence | fail c" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
   [%expect {| Error("expected c, got z") |}]
+;;
+
+let%expect_test "string | success" =
+  let input = "abcz" in
+  let parser = pstring "abc" in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_string) result;
+  [%expect {| Ok("abc", "z") |}]
 ;;
