@@ -11,6 +11,11 @@ let pp_parse_result pp_ok oc = function
 
 (* Primitive parsers *)
 
+let fail message =
+  let parse_fn _ = Error message in
+  { parse = parse_fn }
+;;
+
 let pchar expected =
   let parse_fn input =
     let length = String.length input in
@@ -43,6 +48,9 @@ let ( <|> ) parser1 parser2 =
   in
   { parse = parse_fn }
 ;;
+
+let choice parsers = List.fold_left ( <|> ) (fail "no choice") parsers
+let any_of chars = chars |> List.map pchar |> choice
 
 (* Tests *)
 
@@ -175,4 +183,20 @@ let%expect_test "a and then (b or c) | empty" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Error("no more input") |}]
+;;
+
+let%expect_test "lowercase | success" =
+  let input = "aBC" in
+  let parser = any_of (List.of_seq (String.to_seq "abcdefghijklmnopqrstuvwxyz")) in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_char) result;
+  [%expect {| Ok('a', "BC") |}]
+;;
+
+let%expect_test "lowercase | fail" =
+  let input = "ABC" in
+  let parser = any_of (List.of_seq (String.to_seq "abcdefghijklmnopqrstuvwxyz")) in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_char) result;
+  [%expect {| Error("expected z, got A") |}]
 ;;
