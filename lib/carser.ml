@@ -136,3 +136,43 @@ let%expect_test "a or b | empty" =
   Printf.printf "%a" (pp_parse_result pp_char) result;
   [%expect {| Error("no more input") |}]
 ;;
+
+let%expect_test "a and then (b or c) | success b" =
+  let input = "abz" in
+  let parser = pchar 'a' >> (pchar 'b' <|> pchar 'c') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
+  [%expect {| Ok(('a', 'b'), "z") |}]
+;;
+
+let%expect_test "a and then (b or c) | success c" =
+  let input = "acz" in
+  let parser = pchar 'a' >> (pchar 'b' <|> pchar 'c') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
+  [%expect {| Ok(('a', 'c'), "z") |}]
+;;
+
+let%expect_test "a and then (b or c) | fail a" =
+  let input = "zcz" in
+  let parser = pchar 'a' >> (pchar 'b' <|> pchar 'c') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
+  [%expect {| Error("expected a, got z") |}]
+;;
+
+let%expect_test "a and then (b or c) | fail bc" =
+  let input = "azz" in
+  let parser = pchar 'a' >> (pchar 'b' <|> pchar 'c') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
+  [%expect {| Error("expected c, got z") |}]
+;;
+
+let%expect_test "a and then (b or c) | empty" =
+  let input = "" in
+  let parser = pchar 'a' >> (pchar 'b' <|> pchar 'c') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
+  [%expect {| Error("no more input") |}]
+;;
