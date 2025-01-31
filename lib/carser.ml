@@ -92,6 +92,18 @@ let string string =
   chars |> List.to_seq |> String.of_seq
 ;;
 
+let many parser =
+  let rec helper parser input =
+    match parser.parse input with
+    | Error _ -> [], input
+    | Ok (x, rest1) ->
+      let xs, rest2 = helper parser rest1 in
+      x :: xs, rest2
+  in
+  let parse_fn input = Ok (helper parser input) in
+  { parse = parse_fn }
+;;
+
 (* Tests *)
 
 let pp_list pp_elem oc list =
@@ -290,4 +302,36 @@ let%expect_test "string | success" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_string) result;
   [%expect {| Ok("abc", "z") |}]
+;;
+
+let%expect_test "many a | success 3" =
+  let input = "aaaz" in
+  let parser = many (char 'a') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Ok(['a', 'a', 'a'], "z") |}]
+;;
+
+let%expect_test "many a | success 2" =
+  let input = "aazz" in
+  let parser = many (char 'a') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Ok(['a', 'a'], "zz") |}]
+;;
+
+let%expect_test "many a | success 1" =
+  let input = "azzz" in
+  let parser = many (char 'a') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Ok(['a'], "zzz") |}]
+;;
+
+let%expect_test "many a | success 0" =
+  let input = "zzzz" in
+  let parser = many (char 'a') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
+  [%expect {| Ok([], "zzzz") |}]
 ;;
