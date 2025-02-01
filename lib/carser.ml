@@ -110,10 +110,19 @@ let string string =
   chars |> List.to_seq |> String.of_seq
 ;;
 
-let int =
+let uint =
   let digit = [ '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' ] |> any_of in
   let+ digits = some digit in
   digits |> List.to_seq |> String.of_seq |> int_of_string
+;;
+
+let int =
+  let+ sign =
+    map
+      (Option.value ~default:1)
+      (opt (map (Fun.const (-1)) (char '-') <|> map (Fun.const 1) (char '+')))
+  and+ abs = uint in
+  sign * abs
 ;;
 
 (* Tests *)
@@ -388,7 +397,7 @@ let%expect_test "some a | fail" =
 
 let%expect_test "int | success 1" =
   let input = "1abc" in
-  let parser = int in
+  let parser = uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
   [%expect {| Ok(1, "abc") |}]
@@ -396,7 +405,7 @@ let%expect_test "int | success 1" =
 
 let%expect_test "int | success 12" =
   let input = "12bc" in
-  let parser = int in
+  let parser = uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
   [%expect {| Ok(12, "bc") |}]
@@ -404,7 +413,7 @@ let%expect_test "int | success 12" =
 
 let%expect_test "int | success 123" =
   let input = "123c" in
-  let parser = int in
+  let parser = uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
   [%expect {| Ok(123, "c") |}]
@@ -412,7 +421,7 @@ let%expect_test "int | success 123" =
 
 let%expect_test "int | success 1234" =
   let input = "1234" in
-  let parser = int in
+  let parser = uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
   [%expect {| Ok(1234, "") |}]
@@ -420,7 +429,7 @@ let%expect_test "int | success 1234" =
 
 let%expect_test "int | fail" =
   let input = "abc" in
-  let parser = int in
+  let parser = uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
   [%expect {| Error("expected 9, got a") |}]
@@ -428,7 +437,7 @@ let%expect_test "int | fail" =
 
 let%expect_test "opt | success some" =
   let input = "123;" in
-  let parser = int >> opt (char ';') in
+  let parser = uint >> opt (char ';') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_int (pp_option pp_char))) result;
   [%expect {| Ok((123, Some(';')), "") |}]
@@ -436,8 +445,40 @@ let%expect_test "opt | success some" =
 
 let%expect_test "opt | success none" =
   let input = "123" in
-  let parser = int >> opt (char ';') in
+  let parser = uint >> opt (char ';') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_int (pp_option pp_char))) result;
   [%expect {| Ok((123, None), "") |}]
+;;
+
+let%expect_test "int | success positive" =
+  let input = "123z" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(123, "z") |}]
+;;
+
+let%expect_test "int | success negative" =
+  let input = "-123z" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(-123, "z") |}]
+;;
+
+let%expect_test "int | fail positive" =
+  let input = "abcz" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Error("expected 9, got a") |}]
+;;
+
+let%expect_test "int | fail negative" =
+  let input = "-abcz" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Error("expected 9, got a") |}]
 ;;
