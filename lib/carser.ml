@@ -1,47 +1,68 @@
 (* Types *)
 
-type 'a parse_result = ('a, string) Result.t
-type 'a parser = { parse : string -> ('a * string) parse_result }
+type parser_label = string
+type parser_error = string
+type 'a parse_result = ('a, parser_label * parser_error) Result.t
+
+type 'a parser =
+  { parse : string -> ('a * string) parse_result
+  ; label : parser_label
+  }
+
 type 'a t = 'a parser
 
 let pp_parse_result pp_ok oc = function
   | Ok (x, rest) -> Printf.fprintf oc "Ok(%a, \"%s\")" pp_ok x rest
-  | Error message -> Printf.fprintf oc "Error(\"%s\")" message
+  | Error (label, message) -> Printf.fprintf oc "Error(\"%s\", \"%s\")" label message
 ;;
+
+let run parser = parser.parse
 
 (* Primitive parsers *)
 
 let fail message =
-  let parse_fn _ = Error message in
-  { parse = parse_fn }
+  let parse_fn _ = Error (message, message) in
+  { parse = parse_fn; label = message }
 ;;
 
 let const x =
   let parse_fn input = Ok (x, input) in
-  { parse = parse_fn }
+  { parse = parse_fn; label = "<const>" }
 ;;
 
-let char expected =
+let satisfy predicate label =
   let parse_fn input =
     let length = String.length input in
     if length == 0
-    then Error "no more input"
-    else if String.get input 0 == expected
+    then Error (label, "no more input")
+    else if predicate (String.get input 0)
     then Ok (String.get input 0, String.sub input 1 (length - 1))
-    else Error (Printf.sprintf "expected %c, got %c" expected (String.get input 0))
+    else Error (label, Printf.sprintf "unexpected '%c'" (String.get input 0))
   in
-  { parse = parse_fn }
+  { parse = parse_fn; label }
 ;;
 
 (* Parser combinators *)
 
+let with_label label parser =
+  let parse_fn input =
+    match parser.parse input with
+    | Ok x -> Ok x
+    | Error (_, message) -> Error (label, message)
+  in
+  { parse = parse_fn; label }
+;;
+
+let ( <?> ) parser label = with_label label parser
+
 let bind parser_x fn =
+  let label = "unknown" in
   let parse_fn input =
     let ( let* ) = Result.bind in
     let* x, rest1 = parser_x.parse input in
     (fn x).parse rest1
   in
-  { parse = parse_fn }
+  { parse = parse_fn; label }
 ;;
 
 let ( >>= ) = bind
@@ -55,22 +76,22 @@ let map f parser =
 let ( let+ ) x f = map f x
 
 let ( *>>* ) parser1 parser2 =
-  let* x1 = parser1 in
-  let* x2 = parser2 in
-  const (x1, x2)
+  let label = Printf.sprintf "%s and then %s" parser1.label parser2.label in
+  (let* x1 = parser1 in
+   let* x2 = parser2 in
+   const (x1, x2))
+  <?> label
 ;;
 
 let ( and+ ) = ( *>>* )
 
 let ( *>> ) parser1 parser2 =
-  let+ value = parser1
-  and+ _ = parser2 in
+  let+ value, _ = parser1 *>>* parser2 in
   value
 ;;
 
 let ( >>* ) parser1 parser2 =
-  let+ _ = parser1
-  and+ value = parser2 in
+  let+ _, value = parser1 *>>* parser2 in
   value
 ;;
 
@@ -78,26 +99,37 @@ let between left right parser = left >>* parser *>> right
 
 let rec sequence parsers =
   match parsers with
-  | [] -> const []
+  | [] -> const [] <?> "nothing"
   | phead :: ptail ->
-    let+ head = phead
-    and+ tail = sequence ptail in
-    head :: tail
+    let label =
+      parsers |> List.map (fun parser -> parser.label) |> String.concat " and then "
+    in
+    (let+ head = phead
+     and+ tail = sequence ptail <?> "foo" in
+     head :: tail)
+    <?> label
 ;;
 
 let ( <|> ) parser1 parser2 =
+  let label = Printf.sprintf "%s or %s" parser1.label parser2.label in
   let parse_fn input =
     match parser1.parse input with
     | Ok x -> Ok x
-    | Error _ -> parser2.parse input
+    | Error _ ->
+      (match parser2.parse input with
+       | Ok x -> Ok x
+       | Error (_, message) -> Error (label, message))
   in
-  { parse = parse_fn }
+  { parse = parse_fn; label }
 ;;
 
-let choice parsers = List.fold_left ( <|> ) (fail "no choice") parsers
-let any_of chars = chars |> List.map char |> choice
+let choice = function
+  | [] -> raise (Invalid_argument "choice: list")
+  | first :: rest -> List.fold_left ( <|> ) first rest
+;;
 
 let many parser =
+  let label = Printf.sprintf "many %s" parser.label in
   let rec helper parser input =
     match parser.parse input with
     | Error _ -> [], input
@@ -106,13 +138,14 @@ let many parser =
       x :: xs, rest2
   in
   let parse_fn input = Ok (helper parser input) in
-  { parse = parse_fn }
+  { parse = parse_fn; label }
 ;;
 
 let some parser =
-  let+ first = parser
-  and+ rest = many parser in
-  first :: rest
+  (let+ first = parser
+   and+ rest = many parser in
+   first :: rest)
+  <?> Printf.sprintf "some %s" parser.label
 ;;
 
 let opt parser =
@@ -122,7 +155,9 @@ let opt parser =
 ;;
 
 let sep_by_1 separator parser =
-  let sep_then_p = separator >>* parser in
+  let sep_then_p =
+    separator >>* parser <?> Printf.sprintf "%s and then %s" separator.label parser.label
+  in
   let+ head = parser
   and+ tail = many sep_then_p in
   head :: tail
@@ -132,24 +167,29 @@ let sep_by separator parser = sep_by_1 separator parser <|> const []
 
 (* Combined parsers *)
 
+let char expected = satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
+let any_of chars = chars |> List.map char |> choice
+
 let string string =
-  let+ chars = string |> String.to_seq |> Seq.map char |> List.of_seq |> sequence in
-  chars |> List.to_seq |> String.of_seq
+  (let+ chars = string |> String.to_seq |> Seq.map char |> List.of_seq |> sequence in
+   chars |> List.to_seq |> String.of_seq)
+  <?> Printf.sprintf "\"%s\"" string
 ;;
 
 let uint =
-  let digit = [ '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' ] |> any_of in
+  let digit = any_of [ '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' ] <?> "digit" in
   let+ digits = some digit in
   digits |> List.to_seq |> String.of_seq |> int_of_string
 ;;
 
 let int =
-  let+ sign =
-    map
-      (Option.value ~default:1)
-      (opt (map (Fun.const (-1)) (char '-') <|> map (Fun.const 1) (char '+')))
-  and+ abs = uint in
-  sign * abs
+  (let+ sign =
+     map
+       (Option.value ~default:1)
+       (opt (map (Fun.const (-1)) (char '-') <|> map (Fun.const 1) (char '+')))
+   and+ abs = uint in
+   sign * abs)
+  <?> "int"
 ;;
 
 (* Tests *)
@@ -187,7 +227,7 @@ let%expect_test "a | fail" =
   let parse_a = char 'a' in
   let result = parse_a.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
-  [%expect {| Error("expected a, got z") |}]
+  [%expect {| Error("'a'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "a | empty" =
@@ -195,7 +235,7 @@ let%expect_test "a | empty" =
   let parse_a = char 'a' in
   let result = parse_a.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
-  [%expect {| Error("no more input") |}]
+  [%expect {| Error("'a'", "no more input") |}]
 ;;
 
 let%expect_test "a then b | success" =
@@ -211,7 +251,7 @@ let%expect_test "a then b | fail a" =
   let parser = char 'a' *>>* char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
-  [%expect {| Error("expected a, got z") |}]
+  [%expect {| Error("'a' and then 'b'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "a then b | fail b" =
@@ -219,7 +259,7 @@ let%expect_test "a then b | fail b" =
   let parser = char 'a' *>>* char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
-  [%expect {| Error("expected b, got z") |}]
+  [%expect {| Error("'a' and then 'b'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "a then b | empty" =
@@ -227,7 +267,7 @@ let%expect_test "a then b | empty" =
   let parser = char 'a' *>>* char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
-  [%expect {| Error("no more input") |}]
+  [%expect {| Error("'a' and then 'b'", "no more input") |}]
 ;;
 
 let%expect_test "a or b | success a" =
@@ -251,7 +291,7 @@ let%expect_test "a or b | fail" =
   let parser = char 'a' <|> char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
-  [%expect {| Error("expected b, got z") |}]
+  [%expect {| Error("'a' or 'b'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "a or b | empty" =
@@ -259,7 +299,7 @@ let%expect_test "a or b | empty" =
   let parser = char 'a' <|> char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
-  [%expect {| Error("no more input") |}]
+  [%expect {| Error("'a' or 'b'", "no more input") |}]
 ;;
 
 let%expect_test "a and then (b or c) | success b" =
@@ -283,7 +323,7 @@ let%expect_test "a and then (b or c) | fail a" =
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
-  [%expect {| Error("expected a, got z") |}]
+  [%expect {| Error("'a' and then 'b' or 'c'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "a and then (b or c) | fail bc" =
@@ -291,7 +331,7 @@ let%expect_test "a and then (b or c) | fail bc" =
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
-  [%expect {| Error("expected c, got z") |}]
+  [%expect {| Error("'a' and then 'b' or 'c'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "a and then (b or c) | empty" =
@@ -299,12 +339,14 @@ let%expect_test "a and then (b or c) | empty" =
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
-  [%expect {| Error("no more input") |}]
+  [%expect {| Error("'a' and then 'b' or 'c'", "no more input") |}]
 ;;
 
 let%expect_test "lowercase | success" =
   let input = "aBC" in
-  let parser = any_of (List.of_seq (String.to_seq "abcdefghijklmnopqrstuvwxyz")) in
+  let parser =
+    any_of (List.of_seq (String.to_seq "abcdefghijklmnopqrstuvwxyz")) <?> "lowercase"
+  in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
   [%expect {| Ok('a', "BC") |}]
@@ -312,10 +354,12 @@ let%expect_test "lowercase | success" =
 
 let%expect_test "lowercase | fail" =
   let input = "ABC" in
-  let parser = any_of (List.of_seq (String.to_seq "abcdefghijklmnopqrstuvwxyz")) in
+  let parser =
+    any_of (List.of_seq (String.to_seq "abcdefghijklmnopqrstuvwxyz")) <?> "lowercase"
+  in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
-  [%expect {| Error("expected z, got A") |}]
+  [%expect {| Error("lowercase", "unexpected 'A'") |}]
 ;;
 
 let%expect_test "sequence | success" =
@@ -331,7 +375,7 @@ let%expect_test "sequence | fail a" =
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
-  [%expect {| Error("expected a, got z") |}]
+  [%expect {| Error("'a' and then 'b' and then 'c'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "sequence | fail b" =
@@ -339,7 +383,7 @@ let%expect_test "sequence | fail b" =
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
-  [%expect {| Error("expected b, got z") |}]
+  [%expect {| Error("'a' and then 'b' and then 'c'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "sequence | fail c" =
@@ -347,7 +391,7 @@ let%expect_test "sequence | fail c" =
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
-  [%expect {| Error("expected c, got z") |}]
+  [%expect {| Error("'a' and then 'b' and then 'c'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "string | success" =
@@ -419,7 +463,7 @@ let%expect_test "some a | fail" =
   let parser = some (char 'a') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
-  [%expect {| Error("expected a, got z") |}]
+  [%expect {| Error("some 'a'", "unexpected 'z'") |}]
 ;;
 
 let%expect_test "int | success 1" =
@@ -459,7 +503,7 @@ let%expect_test "int | fail" =
   let parser = uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
-  [%expect {| Error("expected 9, got a") |}]
+  [%expect {| Error("some digit", "unexpected 'a'") |}]
 ;;
 
 let%expect_test "opt | success some" =
@@ -499,7 +543,7 @@ let%expect_test "int | fail positive" =
   let parser = int in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
-  [%expect {| Error("expected 9, got a") |}]
+  [%expect {| Error("int", "unexpected 'a'") |}]
 ;;
 
 let%expect_test "int | fail negative" =
@@ -507,7 +551,7 @@ let%expect_test "int | fail negative" =
   let parser = int in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
-  [%expect {| Error("expected 9, got a") |}]
+  [%expect {| Error("int", "unexpected 'a'") |}]
 ;;
 
 let%expect_test "ignore_right | success" =
@@ -563,7 +607,7 @@ let%expect_test "sep_by_1 | fail" =
   let parser = sep_by_1 (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Error("expected 9, got ;") |}]
+  [%expect {| Error("unknown and then many ',' and then unknown", "unexpected ';'") |}]
 ;;
 
 let%expect_test "sep_by | success 3" =
