@@ -177,7 +177,7 @@ let string string =
 ;;
 
 let uint =
-  let digit = any_of [ '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' ] <?> "digit" in
+  let digit = satisfy (String.contains "0123456789") "digit" in
   let+ digits = some digit in
   digits |> List.to_seq |> String.of_seq |> int_of_string
 ;;
