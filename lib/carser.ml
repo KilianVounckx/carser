@@ -46,7 +46,7 @@ let map f parser =
 
 let ( let+ ) x f = map f x
 
-let ( >> ) parser1 parser2 =
+let ( *>>* ) parser1 parser2 =
   let parse_fn input =
     let ( let* ) = Result.bind in
     let* value1, rest1 = parser1.parse input in
@@ -56,7 +56,19 @@ let ( >> ) parser1 parser2 =
   { parse = parse_fn }
 ;;
 
-let ( and+ ) = ( >> )
+let ( and+ ) = ( *>>* )
+
+let ( *>> ) parser1 parser2 =
+  let+ value = parser1
+  and+ _ = parser2 in
+  value
+;;
+
+let ( >>* ) parser1 parser2 =
+  let+ _ = parser1
+  and+ value = parser2 in
+  value
+;;
 
 let rec sequence parsers =
   match parsers with
@@ -173,7 +185,7 @@ let%expect_test "a | empty" =
 
 let%expect_test "a then b | success" =
   let input = "abc" in
-  let parser = char 'a' >> char 'b' in
+  let parser = char 'a' *>>* char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Ok(('a', 'b'), "c") |}]
@@ -181,7 +193,7 @@ let%expect_test "a then b | success" =
 
 let%expect_test "a then b | fail a" =
   let input = "zbc" in
-  let parser = char 'a' >> char 'b' in
+  let parser = char 'a' *>>* char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Error("expected a, got z") |}]
@@ -189,7 +201,7 @@ let%expect_test "a then b | fail a" =
 
 let%expect_test "a then b | fail b" =
   let input = "azc" in
-  let parser = char 'a' >> char 'b' in
+  let parser = char 'a' *>>* char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Error("expected b, got z") |}]
@@ -197,7 +209,7 @@ let%expect_test "a then b | fail b" =
 
 let%expect_test "a then b | empty" =
   let input = "" in
-  let parser = char 'a' >> char 'b' in
+  let parser = char 'a' *>>* char 'b' in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Error("no more input") |}]
@@ -237,7 +249,7 @@ let%expect_test "a or b | empty" =
 
 let%expect_test "a and then (b or c) | success b" =
   let input = "abz" in
-  let parser = char 'a' >> (char 'b' <|> char 'c') in
+  let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Ok(('a', 'b'), "z") |}]
@@ -245,7 +257,7 @@ let%expect_test "a and then (b or c) | success b" =
 
 let%expect_test "a and then (b or c) | success c" =
   let input = "acz" in
-  let parser = char 'a' >> (char 'b' <|> char 'c') in
+  let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Ok(('a', 'c'), "z") |}]
@@ -253,7 +265,7 @@ let%expect_test "a and then (b or c) | success c" =
 
 let%expect_test "a and then (b or c) | fail a" =
   let input = "zcz" in
-  let parser = char 'a' >> (char 'b' <|> char 'c') in
+  let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Error("expected a, got z") |}]
@@ -261,7 +273,7 @@ let%expect_test "a and then (b or c) | fail a" =
 
 let%expect_test "a and then (b or c) | fail bc" =
   let input = "azz" in
-  let parser = char 'a' >> (char 'b' <|> char 'c') in
+  let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Error("expected c, got z") |}]
@@ -269,7 +281,7 @@ let%expect_test "a and then (b or c) | fail bc" =
 
 let%expect_test "a and then (b or c) | empty" =
   let input = "" in
-  let parser = char 'a' >> (char 'b' <|> char 'c') in
+  let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_char pp_char)) result;
   [%expect {| Error("no more input") |}]
@@ -437,7 +449,7 @@ let%expect_test "int | fail" =
 
 let%expect_test "opt | success some" =
   let input = "123;" in
-  let parser = uint >> opt (char ';') in
+  let parser = uint *>>* opt (char ';') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_int (pp_option pp_char))) result;
   [%expect {| Ok((123, Some(';')), "") |}]
@@ -445,7 +457,7 @@ let%expect_test "opt | success some" =
 
 let%expect_test "opt | success none" =
   let input = "123" in
-  let parser = uint >> opt (char ';') in
+  let parser = uint *>>* opt (char ';') in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_int (pp_option pp_char))) result;
   [%expect {| Ok((123, None), "") |}]
@@ -481,4 +493,20 @@ let%expect_test "int | fail negative" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
   [%expect {| Error("expected 9, got a") |}]
+;;
+
+let%expect_test "ignore_right | success" =
+  let input = "123;" in
+  let parser = int *>> char ';' in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "ignore_left | success" =
+  let input = ";123" in
+  let parser = char ';' >>* int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(123, "") |}]
 ;;
