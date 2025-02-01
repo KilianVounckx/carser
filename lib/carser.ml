@@ -46,16 +46,6 @@ let map f parser =
 
 let ( let+ ) x f = map f x
 
-let ( and+ ) parser1 parser2 =
-  let parse_fn input =
-    let ( let* ) = Result.bind in
-    let* x, rest1 = parser1.parse input in
-    let* y, rest2 = parser2.parse rest1 in
-    Ok ((x, y), rest2)
-  in
-  { parse = parse_fn }
-;;
-
 let ( >> ) parser1 parser2 =
   let parse_fn input =
     let ( let* ) = Result.bind in
@@ -65,6 +55,8 @@ let ( >> ) parser1 parser2 =
   in
   { parse = parse_fn }
 ;;
+
+let ( and+ ) = ( >> )
 
 let rec sequence parsers =
   match parsers with
