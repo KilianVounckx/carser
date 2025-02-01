@@ -35,25 +35,29 @@ let char expected =
 
 (* Parser combinators *)
 
-let map f parser =
+let bind parser_x fn =
   let parse_fn input =
-    let ( let+ ) = Fun.flip Result.map in
-    let+ value, rest = parser.parse input in
-    f value, rest
+    let ( let* ) = Result.bind in
+    let* x, rest1 = parser_x.parse input in
+    (fn x).parse rest1
   in
   { parse = parse_fn }
+;;
+
+let ( >>= ) = bind
+let ( let* ) = bind
+
+let map f parser =
+  let* x = parser in
+  const (f x)
 ;;
 
 let ( let+ ) x f = map f x
 
 let ( *>>* ) parser1 parser2 =
-  let parse_fn input =
-    let ( let* ) = Result.bind in
-    let* value1, rest1 = parser1.parse input in
-    let* value2, rest2 = parser2.parse rest1 in
-    Ok ((value1, value2), rest2)
-  in
-  { parse = parse_fn }
+  let* x1 = parser1 in
+  let* x2 = parser2 in
+  const (x1, x2)
 ;;
 
 let ( and+ ) = ( *>>* )
@@ -71,18 +75,6 @@ let ( >>* ) parser1 parser2 =
 ;;
 
 let between left right parser = left >>* parser *>> right
-
-let bind parser_x fn =
-  let parse_fn input =
-    let ( let* ) = Result.bind in
-    let* x, rest1 = parser_x.parse input in
-    (fn x).parse rest1
-  in
-  { parse = parse_fn }
-;;
-
-let ( >>= ) = bind
-let ( let* ) = bind
 
 let rec sequence parsers =
   match parsers with
