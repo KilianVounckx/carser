@@ -110,6 +110,12 @@ let some parser =
   first :: rest
 ;;
 
+let int =
+  let digit = [ '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' ] |> any_of in
+  let+ digits = some digit in
+  digits |> List.to_seq |> String.of_seq |> int_of_string
+;;
+
 (* Tests *)
 
 let pp_list pp_elem oc list =
@@ -124,6 +130,7 @@ let pp_list pp_elem oc list =
 
 let pp_pair pp_left pp_right oc (x, y) = Printf.fprintf oc "(%a, %a)" pp_left x pp_right y
 let pp_string oc s = Printf.fprintf oc "\"%s\"" s
+let pp_int oc n = Printf.fprintf oc "%d" n
 let pp_char oc c = Printf.fprintf oc "'%c'" c
 
 let%expect_test "a | success" =
@@ -372,4 +379,44 @@ let%expect_test "some a | fail" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_char)) result;
   [%expect {| Error("expected a, got z") |}]
+;;
+
+let%expect_test "int | success 1" =
+  let input = "1abc" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(1, "abc") |}]
+;;
+
+let%expect_test "int | success 12" =
+  let input = "12bc" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(12, "bc") |}]
+;;
+
+let%expect_test "int | success 123" =
+  let input = "123c" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(123, "c") |}]
+;;
+
+let%expect_test "int | success 1234" =
+  let input = "1234" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(1234, "") |}]
+;;
+
+let%expect_test "int | fail" =
+  let input = "abc" in
+  let parser = int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Error("expected 9, got a") |}]
 ;;
