@@ -117,6 +117,15 @@ let opt parser =
   some <|> none
 ;;
 
+let sep_by_1 separator parser =
+  let sep_then_p = separator >>* parser in
+  let+ head = parser
+  and+ tail = many sep_then_p in
+  head :: tail
+;;
+
+let sep_by separator parser = sep_by_1 separator parser <|> const []
+
 (* Combined parsers *)
 
 let string string =
@@ -518,5 +527,69 @@ let%expect_test "between | success" =
   let parser = between (char '(') (char ')') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "sep_by_1 | success 3" =
+  let input = "1,2,3;" in
+  let parser = sep_by_1 (char ',') uint in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "sep_by_1 | success 2" =
+  let input = "1,2;" in
+  let parser = sep_by_1 (char ',') uint in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "sep_by_1 | success 1" =
+  let input = "1,;" in
+  let parser = sep_by_1 (char ',') uint in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "sep_by_1 | fail" =
+  let input = ";" in
+  let parser = sep_by_1 (char ',') uint in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "sep_by | success 3" =
+  let input = "1,2,3;" in
+  let parser = sep_by (char ',') uint in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "sep_by | success 2" =
+  let input = "1,2;" in
+  let parser = sep_by (char ',') uint in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "sep_by | success 1" =
+  let input = "1,;" in
+  let parser = sep_by (char ',') uint in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "sep_by | success 0" =
+  let input = ";" in
+  let parser = sep_by (char ',') uint in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
   [%expect {| Ok(123, "") |}]
 ;;
