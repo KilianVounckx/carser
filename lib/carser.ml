@@ -79,11 +79,6 @@ let ( <|> ) parser1 parser2 =
 let choice parsers = List.fold_left ( <|> ) (fail "no choice") parsers
 let any_of chars = chars |> List.map char |> choice
 
-let string string =
-  let+ chars = string |> String.to_seq |> Seq.map char |> List.of_seq |> sequence in
-  chars |> List.to_seq |> String.of_seq
-;;
-
 let many parser =
   let rec helper parser input =
     match parser.parse input with
@@ -102,6 +97,19 @@ let some parser =
   first :: rest
 ;;
 
+let opt parser =
+  let some = map Option.some parser in
+  let none = const Option.none in
+  some <|> none
+;;
+
+(* Combined parsers *)
+
+let string string =
+  let+ chars = string |> String.to_seq |> Seq.map char |> List.of_seq |> sequence in
+  chars |> List.to_seq |> String.of_seq
+;;
+
 let int =
   let digit = [ '0'; '1'; '2'; '3'; '4'; '5'; '6'; '7'; '8'; '9' ] |> any_of in
   let+ digits = some digit in
@@ -118,6 +126,11 @@ let pp_list pp_elem oc list =
        Printf.fprintf oc "%a" pp_elem elem)
     list;
   Printf.fprintf oc "]"
+;;
+
+let pp_option pp_elem oc = function
+  | Some x -> Printf.fprintf oc "Some(%a)" pp_elem x
+  | None -> Printf.fprintf oc "None"
 ;;
 
 let pp_pair pp_left pp_right oc (x, y) = Printf.fprintf oc "(%a, %a)" pp_left x pp_right y
@@ -411,4 +424,20 @@ let%expect_test "int | fail" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
   [%expect {| Error("expected 9, got a") |}]
+;;
+
+let%expect_test "opt | success some" =
+  let input = "123;" in
+  let parser = int >> opt (char ';') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_pair pp_int (pp_option pp_char))) result;
+  [%expect {| Ok((123, Some(';')), "") |}]
+;;
+
+let%expect_test "opt | success none" =
+  let input = "123" in
+  let parser = int >> opt (char ';') in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_pair pp_int (pp_option pp_char))) result;
+  [%expect {| Ok((123, None), "") |}]
 ;;
