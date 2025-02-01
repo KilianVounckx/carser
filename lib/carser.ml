@@ -72,6 +72,18 @@ let ( >>* ) parser1 parser2 =
 
 let between left right parser = left >>* parser *>> right
 
+let bind parser_x fn =
+  let parse_fn input =
+    let ( let* ) = Result.bind in
+    let* x, rest1 = parser_x.parse input in
+    (fn x).parse rest1
+  in
+  { parse = parse_fn }
+;;
+
+let ( >>= ) = bind
+let ( let* ) = bind
+
 let rec sequence parsers =
   match parsers with
   | [] -> const []
@@ -535,7 +547,7 @@ let%expect_test "sep_by_1 | success 3" =
   let parser = sep_by_1 (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Ok(123, "") |}]
+  [%expect {| Ok([1, 2, 3], ";") |}]
 ;;
 
 let%expect_test "sep_by_1 | success 2" =
@@ -543,7 +555,7 @@ let%expect_test "sep_by_1 | success 2" =
   let parser = sep_by_1 (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Ok(123, "") |}]
+  [%expect {| Ok([1, 2], ";") |}]
 ;;
 
 let%expect_test "sep_by_1 | success 1" =
@@ -551,7 +563,7 @@ let%expect_test "sep_by_1 | success 1" =
   let parser = sep_by_1 (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Ok(123, "") |}]
+  [%expect {| Ok([1], ",;") |}]
 ;;
 
 let%expect_test "sep_by_1 | fail" =
@@ -559,7 +571,7 @@ let%expect_test "sep_by_1 | fail" =
   let parser = sep_by_1 (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Ok(123, "") |}]
+  [%expect {| Error("expected 9, got ;") |}]
 ;;
 
 let%expect_test "sep_by | success 3" =
@@ -567,7 +579,7 @@ let%expect_test "sep_by | success 3" =
   let parser = sep_by (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Ok(123, "") |}]
+  [%expect {| Ok([1, 2, 3], ";") |}]
 ;;
 
 let%expect_test "sep_by | success 2" =
@@ -575,7 +587,7 @@ let%expect_test "sep_by | success 2" =
   let parser = sep_by (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Ok(123, "") |}]
+  [%expect {| Ok([1, 2], ";") |}]
 ;;
 
 let%expect_test "sep_by | success 1" =
@@ -583,7 +595,7 @@ let%expect_test "sep_by | success 1" =
   let parser = sep_by (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Ok(123, "") |}]
+  [%expect {| Ok([1], ",;") |}]
 ;;
 
 let%expect_test "sep_by | success 0" =
@@ -591,5 +603,26 @@ let%expect_test "sep_by | success 0" =
   let parser = sep_by (char ',') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_list pp_int)) result;
-  [%expect {| Ok(123, "") |}]
+  [%expect {| Ok([], ";") |}]
+;;
+
+let%expect_test "bind" =
+  let input = "{name:frodo,age:50}" in
+  let parser =
+    let p_name =
+      let+ chars =
+        "abcdefghijklmnopqrstuvwxyz" |> String.to_seq |> List.of_seq |> any_of |> some
+      in
+      chars |> List.to_seq |> String.of_seq
+    in
+    let* _ = string "{name:" in
+    let* name = p_name in
+    let* _ = string ",age:" in
+    let* age = uint in
+    let* _ = char '}' in
+    const (name, age)
+  in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result (pp_pair pp_string pp_int)) result;
+  [%expect {| Ok(("frodo", 50), "") |}]
 ;;
