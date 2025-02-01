@@ -70,6 +70,8 @@ let ( >>* ) parser1 parser2 =
   value
 ;;
 
+let between left right parser = left >>* parser *>> right
+
 let rec sequence parsers =
   match parsers with
   | [] -> const []
@@ -506,6 +508,14 @@ let%expect_test "ignore_right | success" =
 let%expect_test "ignore_left | success" =
   let input = ";123" in
   let parser = char ';' >>* int in
+  let result = parser.parse input in
+  Printf.printf "%a" (pp_parse_result pp_int) result;
+  [%expect {| Ok(123, "") |}]
+;;
+
+let%expect_test "between | success" =
+  let input = "(123)" in
+  let parser = between (char '(') (char ')') uint in
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result pp_int) result;
   [%expect {| Ok(123, "") |}]
