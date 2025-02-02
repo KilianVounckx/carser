@@ -1,5 +1,45 @@
 (* Types *)
 
+type position =
+  { line : int
+  ; column : int
+  }
+
+let initial_position = { line = 0; column = 0 }
+let inc_line pos = { line = pos.line + 1; column = 0 }
+let inc_column pos = { pos with column = pos.column + 1 }
+
+module InputState = struct
+  type t =
+    { lines : string array
+    ; position : position
+    }
+
+  let from_string string =
+    let lines = string |> String.split_on_char '\n' |> Array.of_list in
+    { lines = (if lines = [| "" |] then [||] else lines); position = initial_position }
+  ;;
+
+  let next_char state =
+    let { line; column } = state.position in
+    if line >= Array.length state.lines
+    then state, None
+    else (
+      let line = state.lines.(line) in
+      if column < String.length line
+      then (
+        let char = String.get line column in
+        let position = inc_column state.position in
+        let new_state = { state with position } in
+        new_state, Some char)
+      else (
+        let char = '\n' in
+        let position = inc_line state.position in
+        let new_state = { state with position } in
+        new_state, Some char))
+  ;;
+end
+
 type parser_label = string
 type parser_error = string
 type 'a parse_result = ('a, parser_label * parser_error) Result.t
@@ -661,4 +701,27 @@ let%expect_test "bind" =
   let result = parser.parse input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_string pp_int)) result;
   [%expect {| Ok(("frodo", 50), "") |}]
+;;
+
+let%expect_test "read all chars" =
+  let rec read_all_chars state =
+    let rest, char = InputState.next_char state in
+    match char with
+    | None -> []
+    | Some char -> char :: read_all_chars rest
+  in
+  [ ""; "a"; "ab"; "a\nb" ]
+  |> List.iter (fun s ->
+    Printf.printf "%a\n" (pp_list pp_char) (s |> InputState.from_string |> read_all_chars));
+  [%expect
+    {|
+    []
+    ['a', '
+    ']
+    ['a', 'b', '
+    ']
+    ['a', '
+    ', 'b', '
+    ']
+    |}]
 ;;
