@@ -5,235 +5,306 @@ type position =
   ; column : int
   }
 
-let pp_position oc { line; column } =
-  Printf.fprintf oc "{ line = %d; column = %d }" line column
-;;
-
 let initial_position = { line = 1; column = 1 }
 let inc_line pos = { line = pos.line + 1; column = 1 }
 let inc_column pos = { pos with column = pos.column + 1 }
 
-type state =
-  { input : string
+let pp_position oc { line; column } =
+  Printf.fprintf oc "{ line = %d; column = %d }" line column
+;;
+
+type 's state =
+  { input : 's
   ; index : int
   ; position : position
   }
 
 let state_from_string input = { input; index = 0; position = initial_position }
 
-let next_char state =
-  if state.index >= String.length state.input
-  then state, None
-  else (
-    let char = String.get state.input state.index in
-    let index = state.index + 1 in
-    let position =
-      if char == '\n' then inc_line state.position else inc_column state.position
+module type StreamType = sig
+  type t
+  type token
+
+  val next_token : t state -> (token * t state) option
+  val pp_token : unit -> token -> string
+end
+
+module String : StreamType with type t = string and type token = char = struct
+  type t = string
+  type token = char
+
+  let pp_token () = Printf.sprintf "%c"
+
+  let next_token state =
+    if state.index >= String.length state.input
+    then None
+    else (
+      let char = String.get state.input state.index in
+      let index = state.index + 1 in
+      let position =
+        if char == '\n' then inc_line state.position else inc_column state.position
+      in
+      Some (char, { state with index; position }))
+  ;;
+end
+
+module type S = sig
+  type 'a t
+  type stream
+  type token
+  type parser_label = string
+  type parser_error = string
+  type 'a parse_result = ('a, parser_label * parser_error * position) Result.t
+
+  val pp_error : out_channel -> parser_label * parser_error * position -> unit
+  val run : 'a t -> stream -> ('a * stream state) parse_result
+  val run_eof : 'a t -> stream -> 'a parse_result
+  val fail : string -> 'a t
+  val const : 'a -> 'a t
+  val satisfy : (token -> bool) -> parser_label -> token t
+  val eof : unit t
+  val with_label : parser_label -> 'a t -> 'a t
+  val ( <?> ) : 'a t -> parser_label -> 'a t
+  val bind : 'a t -> ('a -> 'b t) -> 'b t
+  val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
+  val ( let* ) : 'a t -> ('a -> 'b t) -> 'b t
+  val map : ('a -> 'b) -> 'a t -> 'b t
+  val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
+  val ( *>>* ) : 'a t -> 'b t -> ('a * 'b) t
+  val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
+  val ( *>> ) : 'a t -> 'b t -> 'a t
+  val ( >>* ) : 'a t -> 'b t -> 'b t
+  val between : 'a t -> 'b t -> 'c t -> 'c t
+  val sequence : 'a t list -> 'a list t
+  val ( <|> ) : 'a t -> 'a t -> 'a t
+  val choice : 'a t list -> 'a t
+  val many : 'a t -> 'a list t
+  val some : 'a t -> 'a list t
+  val opt : 'a t -> 'a option t
+  val sep_by_1 : 'b t -> 'a t -> 'a list t
+  val sep_by : 'b t -> 'a t -> 'a list t
+end
+
+module Make (Stream : StreamType) :
+  S with type stream = Stream.t with type token = Stream.token = struct
+  type stream = Stream.t
+  type token = Stream.token
+  type parser_label = string
+  type parser_error = string
+  type 'a parse_result = ('a, parser_label * parser_error * position) Result.t
+
+  type 'a t =
+    { parse : stream state -> ('a * stream state) parse_result
+    ; label : parser_label
+    }
+
+  let pp_error oc (label, message, { line; column }) =
+    Printf.fprintf oc "Line:%d Col:%d | Error parsing %s\n%s\n" line column label message
+  ;;
+
+  let run parser input = parser.parse (state_from_string input)
+
+  (* Primitive parsers *)
+
+  let fail message =
+    let parse_fn input = Error (message, message, input.position) in
+    { parse = parse_fn; label = message }
+  ;;
+
+  let const x =
+    let parse_fn input = Ok (x, input) in
+    { parse = parse_fn; label = "<const>" }
+  ;;
+
+  let satisfy predicate label =
+    let parse_fn state =
+      match Stream.next_token state with
+      | None -> Error (label, "no more input", state.position)
+      | Some (token, next) ->
+        if predicate token
+        then Ok (token, next)
+        else
+          Error
+            (label, Printf.sprintf "unexpected '%a'" Stream.pp_token token, state.position)
     in
-    { state with index; position }, Some char)
-;;
+    { parse = parse_fn; label }
+  ;;
 
-type parser_label = string
-type parser_error = string
-type 'a parse_result = ('a, parser_label * parser_error * position) Result.t
-
-type 'a parser =
-  { parse : state -> ('a * state) parse_result
-  ; label : parser_label
-  }
-
-type 'a t = 'a parser
-
-let pp_error oc (label, message, { line; column }) =
-  Printf.fprintf oc "Line:%d Col:%d | Error parsing %s\n%s\n" line column label message
-;;
-
-let pp_parse_result pp_ok oc result =
-  match result with
-  | Ok (x, rest) -> Printf.fprintf oc "Ok(%a, %a)" pp_ok x pp_position rest.position
-  | Error error -> pp_error oc error
-;;
-
-let run parser input = parser.parse (state_from_string input)
-
-(* Primitive parsers *)
-
-let fail message =
-  let parse_fn input = Error (message, message, input.position) in
-  { parse = parse_fn; label = message }
-;;
-
-let const x =
-  let parse_fn input = Ok (x, input) in
-  { parse = parse_fn; label = "<const>" }
-;;
-
-let satisfy predicate label =
-  let parse_fn input =
-    let next, char = next_char input in
-    match char with
-    | None -> Error (label, "no more input", input.position)
-    | Some char ->
-      if predicate char
-      then Ok (char, next)
-      else Error (label, Printf.sprintf "unexpected '%c'" char, input.position)
-  in
-  { parse = parse_fn; label }
-;;
-
-let eof =
-  let label = "eof" in
-  let parse_fn input =
-    let next, char = next_char input in
-    match char with
-    | None -> Ok ((), next)
-    | Some char ->
-      Error (label, Printf.sprintf "expected eof, got '%c'" char, input.position)
-  in
-  { parse = parse_fn; label }
-;;
-
-(* Parser combinators *)
-
-let with_label label parser =
-  let parse_fn input =
-    match parser.parse input with
-    | Ok x -> Ok x
-    | Error (_, message, pos) -> Error (label, message, pos)
-  in
-  { parse = parse_fn; label }
-;;
-
-let ( <?> ) parser label = with_label label parser
-
-let bind parser_x fn =
-  let label = "unknown" in
-  let parse_fn input =
-    let ( let* ) = Result.bind in
-    let* x, rest1 = parser_x.parse input in
-    (fn x).parse rest1
-  in
-  { parse = parse_fn; label }
-;;
-
-let ( >>= ) = bind
-let ( let* ) = bind
-
-let map f parser =
-  let* x = parser in
-  const (f x)
-;;
-
-let ( let+ ) x f = map f x
-
-let ( *>>* ) parser1 parser2 =
-  let label = Printf.sprintf "%s and then %s" parser1.label parser2.label in
-  (let* x1 = parser1 in
-   let* x2 = parser2 in
-   const (x1, x2))
-  <?> label
-;;
-
-let ( and+ ) = ( *>>* )
-
-let ( *>> ) parser1 parser2 =
-  let+ value, _ = parser1 *>>* parser2 in
-  value
-;;
-
-let ( >>* ) parser1 parser2 =
-  let+ _, value = parser1 *>>* parser2 in
-  value
-;;
-
-let between left right parser = left >>* parser *>> right
-
-let rec sequence parsers =
-  match parsers with
-  | [] -> const [] <?> "nothing"
-  | phead :: ptail ->
-    let label =
-      parsers |> List.map (fun parser -> parser.label) |> String.concat " and then "
+  let eof =
+    let label = "eof" in
+    let parse_fn state =
+      match Stream.next_token state with
+      | None -> Ok ((), state)
+      | Some (token, _) ->
+        Error
+          ( label
+          , Printf.sprintf "expected eof, got '%a'" Stream.pp_token token
+          , state.position )
     in
-    (let+ head = phead
-     and+ tail = sequence ptail <?> "foo" in
-     head :: tail)
+    { parse = parse_fn; label }
+  ;;
+
+  (* Parser combinators *)
+
+  let with_label label parser =
+    let parse_fn input =
+      match parser.parse input with
+      | Ok x -> Ok x
+      | Error (_, message, pos) -> Error (label, message, pos)
+    in
+    { parse = parse_fn; label }
+  ;;
+
+  let ( <?> ) parser label = with_label label parser
+
+  let bind parser_x fn =
+    let label = "unknown" in
+    let parse_fn input =
+      let ( let* ) = Result.bind in
+      let* x, rest1 = parser_x.parse input in
+      (fn x).parse rest1
+    in
+    { parse = parse_fn; label }
+  ;;
+
+  let ( >>= ) = bind
+  let ( let* ) = bind
+
+  let map f parser =
+    let* x = parser in
+    const (f x)
+  ;;
+
+  let ( let+ ) x f = map f x
+
+  let ( *>>* ) parser1 parser2 =
+    let label = Printf.sprintf "%s and then %s" parser1.label parser2.label in
+    (let* x1 = parser1 in
+     let* x2 = parser2 in
+     const (x1, x2))
     <?> label
-;;
+  ;;
 
-let ( <|> ) parser1 parser2 =
-  let label = Printf.sprintf "%s or %s" parser1.label parser2.label in
-  let parse_fn input =
-    match parser1.parse input with
-    | Ok x -> Ok x
-    | Error _ ->
-      (match parser2.parse input with
-       | Ok x -> Ok x
-       | Error (_, message, pos) -> Error (label, message, pos))
-  in
-  { parse = parse_fn; label }
-;;
+  let ( and+ ) = ( *>>* )
 
-let choice = function
-  | [] -> raise (Invalid_argument "choice: list")
-  | first :: rest -> List.fold_left ( <|> ) first rest
-;;
+  let ( *>> ) parser1 parser2 =
+    let+ value, _ = parser1 *>>* parser2 in
+    value
+  ;;
 
-let many parser =
-  let label = Printf.sprintf "many %s" parser.label in
-  let rec helper parser input =
-    match parser.parse input with
-    | Error _ -> [], input
-    | Ok (x, rest1) ->
-      let xs, rest2 = helper parser rest1 in
-      x :: xs, rest2
-  in
-  let parse_fn input = Ok (helper parser input) in
-  { parse = parse_fn; label }
-;;
+  let ( >>* ) parser1 parser2 =
+    let+ _, value = parser1 *>>* parser2 in
+    value
+  ;;
 
-let some parser =
-  (let+ first = parser
-   and+ rest = many parser in
-   first :: rest)
-  <?> Printf.sprintf "some %s" parser.label
-;;
+  let between left right parser = left >>* parser *>> right
 
-let opt parser =
-  let some = map Option.some parser in
-  let none = const Option.none in
-  some <|> none
-;;
+  let rec sequence parsers =
+    match parsers with
+    | [] -> const [] <?> "nothing"
+    | phead :: ptail ->
+      let label =
+        parsers
+        |> List.map (fun parser -> parser.label)
+        |> Stdlib.String.concat " and then "
+      in
+      (let+ head = phead
+       and+ tail = sequence ptail <?> "foo" in
+       head :: tail)
+      <?> label
+  ;;
 
-let sep_by_1 separator parser =
-  let sep_then_p =
-    separator >>* parser <?> Printf.sprintf "%s and then %s" separator.label parser.label
-  in
-  let+ head = parser
-  and+ tail = many sep_then_p in
-  head :: tail
-;;
+  let ( <|> ) parser1 parser2 =
+    let label = Printf.sprintf "%s or %s" parser1.label parser2.label in
+    let parse_fn input =
+      match parser1.parse input with
+      | Ok x -> Ok x
+      | Error _ ->
+        (match parser2.parse input with
+         | Ok x -> Ok x
+         | Error (_, message, pos) -> Error (label, message, pos))
+    in
+    { parse = parse_fn; label }
+  ;;
 
-let sep_by separator parser = sep_by_1 separator parser <|> const []
+  let choice = function
+    | [] -> raise (Invalid_argument "choice: list")
+    | first :: rest -> List.fold_left ( <|> ) first rest
+  ;;
+
+  let many parser =
+    let label = Printf.sprintf "many %s" parser.label in
+    let rec helper parser input =
+      match parser.parse input with
+      | Error _ -> [], input
+      | Ok (x, rest1) ->
+        let xs, rest2 = helper parser rest1 in
+        x :: xs, rest2
+    in
+    let parse_fn input = Ok (helper parser input) in
+    { parse = parse_fn; label }
+  ;;
+
+  let some parser =
+    (let+ first = parser
+     and+ rest = many parser in
+     first :: rest)
+    <?> Printf.sprintf "some %s" parser.label
+  ;;
+
+  let opt parser =
+    let some = map Option.some parser in
+    let none = const Option.none in
+    some <|> none
+  ;;
+
+  let sep_by_1 separator parser =
+    let sep_then_p =
+      separator
+      >>* parser
+      <?> Printf.sprintf "%s and then %s" separator.label parser.label
+    in
+    let+ head = parser
+    and+ tail = many sep_then_p in
+    head :: tail
+  ;;
+
+  let sep_by separator parser = sep_by_1 separator parser <|> const []
+
+  let run_eof parser input =
+    let ( let+ ) = Fun.flip Result.map in
+    let+ value, _ = run (parser *>> eof) input in
+    value
+  ;;
+end
 
 (* Combined parsers *)
+module StringParser = Make (String)
 
-let char expected = satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
-let any_of chars = chars |> List.map char |> choice
+let char expected =
+  StringParser.satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
+;;
+
+let any_of chars = chars |> List.map char |> StringParser.choice
 
 let string string =
-  (let+ chars = string |> String.to_seq |> Seq.map char |> List.of_seq |> sequence in
-   chars |> List.to_seq |> String.of_seq)
+  let open StringParser in
+  (let+ chars =
+     string |> Stdlib.String.to_seq |> Seq.map char |> List.of_seq |> sequence
+   in
+   chars |> List.to_seq |> Stdlib.String.of_seq)
   <?> Printf.sprintf "\"%s\"" string
 ;;
 
 let uint =
-  let digit = satisfy (String.contains "0123456789") "digit" in
+  let open StringParser in
+  let digit = satisfy (Stdlib.String.contains "0123456789") "digit" in
   let+ digits = some digit in
-  digits |> List.to_seq |> String.of_seq |> int_of_string
+  digits |> List.to_seq |> Stdlib.String.of_seq |> int_of_string
 ;;
 
 let int =
+  let open StringParser in
   (let+ sign =
      map
        (Option.value ~default:1)
@@ -243,13 +314,13 @@ let int =
   <?> "int"
 ;;
 
-let run_eof parser input =
-  let ( let+ ) = Fun.flip Result.map in
-  let+ value, _ = run (parser *>> eof) input in
-  value
-;;
-
 (* Tests *)
+
+let pp_parse_result pp_ok oc result =
+  match result with
+  | Ok (x, rest) -> Printf.fprintf oc "Ok(%a, %a)" pp_ok x pp_position rest.position
+  | Error error -> StringParser.pp_error oc error
+;;
 
 let pp_list pp_elem oc list =
   Printf.fprintf oc "[";
@@ -272,6 +343,7 @@ let pp_int oc n = Printf.fprintf oc "%d" n
 let pp_char oc c = Printf.fprintf oc "'%c'" c
 
 let%expect_test "a | success" =
+  let open StringParser in
   let input = "abc" in
   let parse_a = char 'a' in
   let result = run parse_a input in
@@ -280,6 +352,7 @@ let%expect_test "a | success" =
 ;;
 
 let%expect_test "a | fail" =
+  let open StringParser in
   let input = "zbc" in
   let parse_a = char 'a' in
   let result = run parse_a input in
@@ -292,6 +365,7 @@ let%expect_test "a | fail" =
 ;;
 
 let%expect_test "a | empty" =
+  let open StringParser in
   let input = "" in
   let parse_a = char 'a' in
   let result = run parse_a input in
@@ -304,6 +378,7 @@ let%expect_test "a | empty" =
 ;;
 
 let%expect_test "a then b | success" =
+  let open StringParser in
   let input = "abc" in
   let parser = char 'a' *>>* char 'b' in
   let result = run parser input in
@@ -312,6 +387,7 @@ let%expect_test "a then b | success" =
 ;;
 
 let%expect_test "a then b | fail a" =
+  let open StringParser in
   let input = "zbc" in
   let parser = char 'a' *>>* char 'b' in
   let result = run parser input in
@@ -324,6 +400,7 @@ let%expect_test "a then b | fail a" =
 ;;
 
 let%expect_test "a then b | fail b" =
+  let open StringParser in
   let input = "azc" in
   let parser = char 'a' *>>* char 'b' in
   let result = run parser input in
@@ -336,6 +413,7 @@ let%expect_test "a then b | fail b" =
 ;;
 
 let%expect_test "a then b | empty" =
+  let open StringParser in
   let input = "" in
   let parser = char 'a' *>>* char 'b' in
   let result = run parser input in
@@ -348,6 +426,7 @@ let%expect_test "a then b | empty" =
 ;;
 
 let%expect_test "a or b | success a" =
+  let open StringParser in
   let input = "azz" in
   let parser = char 'a' <|> char 'b' in
   let result = run parser input in
@@ -356,6 +435,7 @@ let%expect_test "a or b | success a" =
 ;;
 
 let%expect_test "a or b | success b" =
+  let open StringParser in
   let input = "bzz" in
   let parser = char 'a' <|> char 'b' in
   let result = run parser input in
@@ -364,6 +444,7 @@ let%expect_test "a or b | success b" =
 ;;
 
 let%expect_test "a or b | fail" =
+  let open StringParser in
   let input = "zzz" in
   let parser = char 'a' <|> char 'b' in
   let result = run parser input in
@@ -376,6 +457,7 @@ let%expect_test "a or b | fail" =
 ;;
 
 let%expect_test "a or b | empty" =
+  let open StringParser in
   let input = "" in
   let parser = char 'a' <|> char 'b' in
   let result = run parser input in
@@ -388,6 +470,7 @@ let%expect_test "a or b | empty" =
 ;;
 
 let%expect_test "a and then (b or c) | success b" =
+  let open StringParser in
   let input = "abz" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -396,6 +479,7 @@ let%expect_test "a and then (b or c) | success b" =
 ;;
 
 let%expect_test "a and then (b or c) | success c" =
+  let open StringParser in
   let input = "acz" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -404,6 +488,7 @@ let%expect_test "a and then (b or c) | success c" =
 ;;
 
 let%expect_test "a and then (b or c) | fail a" =
+  let open StringParser in
   let input = "zcz" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -416,6 +501,7 @@ let%expect_test "a and then (b or c) | fail a" =
 ;;
 
 let%expect_test "a and then (b or c) | fail bc" =
+  let open StringParser in
   let input = "azz" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -428,6 +514,7 @@ let%expect_test "a and then (b or c) | fail bc" =
 ;;
 
 let%expect_test "a and then (b or c) | empty" =
+  let open StringParser in
   let input = "" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -440,9 +527,11 @@ let%expect_test "a and then (b or c) | empty" =
 ;;
 
 let%expect_test "lowercase | success" =
+  let open StringParser in
   let input = "aBC" in
   let parser =
-    any_of (List.of_seq (String.to_seq "abcdefghijklmnopqrstuvwxyz")) <?> "lowercase"
+    any_of (List.of_seq (Stdlib.String.to_seq "abcdefghijklmnopqrstuvwxyz"))
+    <?> "lowercase"
   in
   let result = run parser input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
@@ -450,9 +539,11 @@ let%expect_test "lowercase | success" =
 ;;
 
 let%expect_test "lowercase | fail" =
+  let open StringParser in
   let input = "ABC" in
   let parser =
-    any_of (List.of_seq (String.to_seq "abcdefghijklmnopqrstuvwxyz")) <?> "lowercase"
+    any_of (List.of_seq (Stdlib.String.to_seq "abcdefghijklmnopqrstuvwxyz"))
+    <?> "lowercase"
   in
   let result = run parser input in
   Printf.printf "%a" (pp_parse_result pp_char) result;
@@ -464,6 +555,7 @@ let%expect_test "lowercase | fail" =
 ;;
 
 let%expect_test "sequence | success" =
+  let open StringParser in
   let input = "abcz" in
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = run parser input in
@@ -472,6 +564,7 @@ let%expect_test "sequence | success" =
 ;;
 
 let%expect_test "sequence | fail a" =
+  let open StringParser in
   let input = "zzzz" in
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = run parser input in
@@ -484,6 +577,7 @@ let%expect_test "sequence | fail a" =
 ;;
 
 let%expect_test "sequence | fail b" =
+  let open StringParser in
   let input = "azzz" in
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = run parser input in
@@ -496,6 +590,7 @@ let%expect_test "sequence | fail b" =
 ;;
 
 let%expect_test "sequence | fail c" =
+  let open StringParser in
   let input = "abzz" in
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = run parser input in
@@ -508,6 +603,7 @@ let%expect_test "sequence | fail c" =
 ;;
 
 let%expect_test "string | success" =
+  let open StringParser in
   let input = "abcz" in
   let parser = string "abc" in
   let result = run parser input in
@@ -516,6 +612,7 @@ let%expect_test "string | success" =
 ;;
 
 let%expect_test "many a | success 3" =
+  let open StringParser in
   let input = "aaaz" in
   let parser = many (char 'a') in
   let result = run parser input in
@@ -524,6 +621,7 @@ let%expect_test "many a | success 3" =
 ;;
 
 let%expect_test "many a | success 2" =
+  let open StringParser in
   let input = "aazz" in
   let parser = many (char 'a') in
   let result = run parser input in
@@ -532,6 +630,7 @@ let%expect_test "many a | success 2" =
 ;;
 
 let%expect_test "many a | success 1" =
+  let open StringParser in
   let input = "azzz" in
   let parser = many (char 'a') in
   let result = run parser input in
@@ -540,6 +639,7 @@ let%expect_test "many a | success 1" =
 ;;
 
 let%expect_test "many a | success 0" =
+  let open StringParser in
   let input = "zzzz" in
   let parser = many (char 'a') in
   let result = run parser input in
@@ -548,6 +648,7 @@ let%expect_test "many a | success 0" =
 ;;
 
 let%expect_test "some a | success 3" =
+  let open StringParser in
   let input = "aaaz" in
   let parser = some (char 'a') in
   let result = run parser input in
@@ -556,6 +657,7 @@ let%expect_test "some a | success 3" =
 ;;
 
 let%expect_test "some a | success 2" =
+  let open StringParser in
   let input = "aazz" in
   let parser = some (char 'a') in
   let result = run parser input in
@@ -564,6 +666,7 @@ let%expect_test "some a | success 2" =
 ;;
 
 let%expect_test "some a | success 1" =
+  let open StringParser in
   let input = "azzz" in
   let parser = some (char 'a') in
   let result = run parser input in
@@ -572,6 +675,7 @@ let%expect_test "some a | success 1" =
 ;;
 
 let%expect_test "some a | fail" =
+  let open StringParser in
   let input = "zzzz" in
   let parser = some (char 'a') in
   let result = run parser input in
@@ -584,6 +688,7 @@ let%expect_test "some a | fail" =
 ;;
 
 let%expect_test "int | success 1" =
+  let open StringParser in
   let input = "1abc" in
   let parser = uint in
   let result = run parser input in
@@ -592,6 +697,7 @@ let%expect_test "int | success 1" =
 ;;
 
 let%expect_test "int | success 12" =
+  let open StringParser in
   let input = "12bc" in
   let parser = uint in
   let result = run parser input in
@@ -600,6 +706,7 @@ let%expect_test "int | success 12" =
 ;;
 
 let%expect_test "int | success 123" =
+  let open StringParser in
   let input = "123c" in
   let parser = uint in
   let result = run parser input in
@@ -608,6 +715,7 @@ let%expect_test "int | success 123" =
 ;;
 
 let%expect_test "int | success 1234" =
+  let open StringParser in
   let input = "1234" in
   let parser = uint in
   let result = run parser input in
@@ -616,6 +724,7 @@ let%expect_test "int | success 1234" =
 ;;
 
 let%expect_test "int | fail" =
+  let open StringParser in
   let input = "abc" in
   let parser = uint in
   let result = run parser input in
@@ -628,6 +737,7 @@ let%expect_test "int | fail" =
 ;;
 
 let%expect_test "opt | success some" =
+  let open StringParser in
   let input = "123;" in
   let parser = uint *>>* opt (char ';') in
   let result = run parser input in
@@ -636,6 +746,7 @@ let%expect_test "opt | success some" =
 ;;
 
 let%expect_test "opt | success none" =
+  let open StringParser in
   let input = "123" in
   let parser = uint *>>* opt (char ';') in
   let result = run parser input in
@@ -644,6 +755,7 @@ let%expect_test "opt | success none" =
 ;;
 
 let%expect_test "int | success positive" =
+  let open StringParser in
   let input = "123z" in
   let parser = int in
   let result = run parser input in
@@ -652,6 +764,7 @@ let%expect_test "int | success positive" =
 ;;
 
 let%expect_test "int | success negative" =
+  let open StringParser in
   let input = "-123z" in
   let parser = int in
   let result = run parser input in
@@ -660,6 +773,7 @@ let%expect_test "int | success negative" =
 ;;
 
 let%expect_test "int | fail positive" =
+  let open StringParser in
   let input = "abcz" in
   let parser = int in
   let result = run parser input in
@@ -672,6 +786,7 @@ let%expect_test "int | fail positive" =
 ;;
 
 let%expect_test "int | fail negative" =
+  let open StringParser in
   let input = "-abcz" in
   let parser = int in
   let result = run parser input in
@@ -684,6 +799,7 @@ let%expect_test "int | fail negative" =
 ;;
 
 let%expect_test "ignore_right | success" =
+  let open StringParser in
   let input = "123;" in
   let parser = int *>> char ';' in
   let result = run parser input in
@@ -692,6 +808,7 @@ let%expect_test "ignore_right | success" =
 ;;
 
 let%expect_test "ignore_left | success" =
+  let open StringParser in
   let input = ";123" in
   let parser = char ';' >>* int in
   let result = run parser input in
@@ -700,6 +817,7 @@ let%expect_test "ignore_left | success" =
 ;;
 
 let%expect_test "between | success" =
+  let open StringParser in
   let input = "(123)" in
   let parser = between (char '(') (char ')') uint in
   let result = run parser input in
@@ -708,6 +826,7 @@ let%expect_test "between | success" =
 ;;
 
 let%expect_test "sep_by_1 | success 3" =
+  let open StringParser in
   let input = "1,2,3;" in
   let parser = sep_by_1 (char ',') uint in
   let result = run parser input in
@@ -716,6 +835,7 @@ let%expect_test "sep_by_1 | success 3" =
 ;;
 
 let%expect_test "sep_by_1 | success 2" =
+  let open StringParser in
   let input = "1,2;" in
   let parser = sep_by_1 (char ',') uint in
   let result = run parser input in
@@ -724,6 +844,7 @@ let%expect_test "sep_by_1 | success 2" =
 ;;
 
 let%expect_test "sep_by_1 | success 1" =
+  let open StringParser in
   let input = "1,;" in
   let parser = sep_by_1 (char ',') uint in
   let result = run parser input in
@@ -732,6 +853,7 @@ let%expect_test "sep_by_1 | success 1" =
 ;;
 
 let%expect_test "sep_by_1 | fail" =
+  let open StringParser in
   let input = ";" in
   let parser = sep_by_1 (char ',') uint in
   let result = run parser input in
@@ -744,6 +866,7 @@ let%expect_test "sep_by_1 | fail" =
 ;;
 
 let%expect_test "sep_by | success 3" =
+  let open StringParser in
   let input = "1,2,3;" in
   let parser = sep_by (char ',') uint in
   let result = run parser input in
@@ -752,6 +875,7 @@ let%expect_test "sep_by | success 3" =
 ;;
 
 let%expect_test "sep_by | success 2" =
+  let open StringParser in
   let input = "1,2;" in
   let parser = sep_by (char ',') uint in
   let result = run parser input in
@@ -760,6 +884,7 @@ let%expect_test "sep_by | success 2" =
 ;;
 
 let%expect_test "sep_by | success 1" =
+  let open StringParser in
   let input = "1,;" in
   let parser = sep_by (char ',') uint in
   let result = run parser input in
@@ -768,6 +893,7 @@ let%expect_test "sep_by | success 1" =
 ;;
 
 let%expect_test "sep_by | success 0" =
+  let open StringParser in
   let input = ";" in
   let parser = sep_by (char ',') uint in
   let result = run parser input in
@@ -776,13 +902,18 @@ let%expect_test "sep_by | success 0" =
 ;;
 
 let%expect_test "bind" =
+  let open StringParser in
   let input = "{name:frodo,age:50}" in
   let parser =
     let p_name =
       let+ chars =
-        "abcdefghijklmnopqrstuvwxyz" |> String.to_seq |> List.of_seq |> any_of |> some
+        "abcdefghijklmnopqrstuvwxyz"
+        |> Stdlib.String.to_seq
+        |> List.of_seq
+        |> any_of
+        |> some
       in
-      chars |> List.to_seq |> String.of_seq
+      chars |> List.to_seq |> Stdlib.String.of_seq
     in
     let* _ = string "{name:" in
     let* name = p_name in
