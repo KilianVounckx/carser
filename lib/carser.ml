@@ -13,33 +13,24 @@ let initial_position = { line = 1; column = 1 }
 let inc_line pos = { line = pos.line + 1; column = 1 }
 let inc_column pos = { pos with column = pos.column + 1 }
 
-type input_state =
-  { lines : string array
+type state =
+  { input : string
+  ; index : int
   ; position : position
   }
 
-let input_state_from_string string =
-  let lines = string |> String.split_on_char '\n' |> Array.of_list in
-  { lines = (if lines = [| "" |] then [||] else lines); position = initial_position }
-;;
+let state_from_string input = { input; index = 0; position = initial_position }
 
 let next_char state =
-  let { line; column } = state.position in
-  if line - 1 >= Array.length state.lines
+  if state.index >= String.length state.input
   then state, None
   else (
-    let line = state.lines.(line - 1) in
-    if column - 1 < String.length line
-    then (
-      let char = String.get line (column - 1) in
-      let position = inc_column state.position in
-      let new_state = { state with position } in
-      new_state, Some char)
-    else (
-      let char = '\n' in
-      let position = inc_line state.position in
-      let new_state = { state with position } in
-      new_state, Some char))
+    let char = String.get state.input state.index in
+    let index = state.index + 1 in
+    let position =
+      if char == '\n' then inc_line state.position else inc_column state.position
+    in
+    { state with index; position }, Some char)
 ;;
 
 type parser_label = string
@@ -47,7 +38,7 @@ type parser_error = string
 type 'a parse_result = ('a, parser_label * parser_error * position) Result.t
 
 type 'a parser =
-  { parse : input_state -> ('a * input_state) parse_result
+  { parse : state -> ('a * state) parse_result
   ; label : parser_label
   }
 
@@ -63,7 +54,7 @@ let pp_parse_result pp_ok oc result =
   | Error error -> pp_error oc error
 ;;
 
-let run parser input = parser.parse (input_state_from_string input)
+let run parser input = parser.parse (state_from_string input)
 
 (* Primitive parsers *)
 
@@ -803,27 +794,4 @@ let%expect_test "bind" =
   let result = run parser input in
   Printf.printf "%a" (pp_parse_result (pp_pair pp_string pp_int)) result;
   [%expect {| Ok(("frodo", 50), { line = 1; column = 20 }) |}]
-;;
-
-let%expect_test "read all chars" =
-  let rec read_all_chars state =
-    let rest, char = next_char state in
-    match char with
-    | None -> []
-    | Some char -> char :: read_all_chars rest
-  in
-  [ ""; "a"; "ab"; "a\nb" ]
-  |> List.iter (fun s ->
-    Printf.printf "%a\n" (pp_list pp_char) (s |> input_state_from_string |> read_all_chars));
-  [%expect
-    {|
-    []
-    ['a', '
-    ']
-    ['a', 'b', '
-    ']
-    ['a', '
-    ', 'b', '
-    ']
-    |}]
 ;;
