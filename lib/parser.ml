@@ -43,25 +43,43 @@ module type S = sig
   val satisfy : (token -> bool) -> parser_label -> token t
   val eof : unit t
   val with_label : parser_label -> 'a t -> 'a t
-  val ( <?> ) : 'a t -> parser_label -> 'a t
   val bind : 'a t -> ('a -> 'b t) -> 'b t
-  val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
-  val ( let* ) : 'a t -> ('a -> 'b t) -> 'b t
   val map : ('a -> 'b) -> 'a t -> 'b t
-  val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
-  val ( *>>* ) : 'a t -> 'b t -> ('a * 'b) t
-  val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
-  val ( *>> ) : 'a t -> 'b t -> 'a t
-  val ( >>* ) : 'a t -> 'b t -> 'b t
+  val and_then : 'a t -> 'b t -> ('a * 'b) t
+  val keep_left : 'a t -> 'b t -> 'a t
+  val keep_right : 'a t -> 'b t -> 'b t
   val between : 'a t -> 'b t -> 'c t -> 'c t
   val sequence : 'a t list -> 'a list t
-  val ( <|> ) : 'a t -> 'a t -> 'a t
+  val or_else : 'a t -> 'a t -> 'a t
   val choice : 'a t list -> 'a t
   val many : 'a t -> 'a list t
   val some : 'a t -> 'a list t
   val opt : 'a t -> 'a option t
   val sep_by_1 : 'b t -> 'a t -> 'a list t
   val sep_by : 'b t -> 'a t -> 'a list t
+
+  module Operators : sig
+    val ( <?> ) : 'a t -> parser_label -> 'a t
+    val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
+    val ( *>>* ) : 'a t -> 'b t -> ('a * 'b) t
+    val ( *>> ) : 'a t -> 'b t -> 'a t
+    val ( >>* ) : 'a t -> 'b t -> 'b t
+    val ( <|> ) : 'a t -> 'a t -> 'a t
+  end
+
+  module Applicative_syntax : sig
+    val ( let+ ) : 'a t -> ('a -> 'b) -> 'b t
+    val ( and+ ) : 'a t -> 'b t -> ('a * 'b) t
+  end
+
+  module Monad_syntax : sig
+    include module type of struct
+      include Applicative_syntax
+    end
+
+    val ( let* ) : 'a t -> ('a -> 'b t) -> 'b t
+    val ( and* ) : 'a t -> 'b t -> ('a * 'b) t
+  end
 end
 
 module Make (Stream : StreamType) :
@@ -146,7 +164,6 @@ module Make (Stream : StreamType) :
     { parse = parse_fn; label }
   ;;
 
-  let ( >>= ) = bind
   let ( let* ) = bind
 
   let map f parser =
@@ -156,7 +173,7 @@ module Make (Stream : StreamType) :
 
   let ( let+ ) x f = map f x
 
-  let ( *>>* ) parser1 parser2 =
+  let and_then parser1 parser2 =
     let label = Printf.sprintf "%s and then %s" parser1.label parser2.label in
     (let* x1 = parser1 in
      let* x2 = parser2 in
@@ -164,18 +181,22 @@ module Make (Stream : StreamType) :
     <?> label
   ;;
 
+  let ( *>>* ) = and_then
   let ( and+ ) = ( *>>* )
 
-  let ( *>> ) parser1 parser2 =
+  let keep_left parser1 parser2 =
     let+ value, _ = parser1 *>>* parser2 in
     value
   ;;
 
-  let ( >>* ) parser1 parser2 =
+  let ( *>> ) = keep_left
+
+  let keep_right parser1 parser2 =
     let+ _, value = parser1 *>>* parser2 in
     value
   ;;
 
+  let ( >>* ) = keep_right
   let between left right parser = left >>* parser *>> right
 
   let rec sequence parsers =
@@ -193,7 +214,7 @@ module Make (Stream : StreamType) :
       <?> label
   ;;
 
-  let ( <|> ) parser1 parser2 =
+  let or_else parser1 parser2 =
     let label = Printf.sprintf "%s or %s" parser1.label parser2.label in
     let parse_fn input =
       match parser1.parse input with
@@ -205,6 +226,8 @@ module Make (Stream : StreamType) :
     in
     { parse = parse_fn; label }
   ;;
+
+  let ( <|> ) = or_else
 
   let choice = function
     | [] -> raise (Invalid_argument "choice: list")
@@ -255,4 +278,25 @@ module Make (Stream : StreamType) :
     let+ value, _ = run (parser *>> eof) input in
     value
   ;;
+
+  module Operators = struct
+    let ( <?> ) label parser = with_label parser label
+    let ( >>= ) = bind
+    let ( *>>* ) = and_then
+    let ( *>> ) = keep_left
+    let ( >>* ) = keep_right
+    let ( <|> ) = or_else
+  end
+
+  module Applicative_syntax = struct
+    let ( let+ ) = ( let+ )
+    let ( and+ ) = ( and+ )
+  end
+
+  module Monad_syntax = struct
+    include Applicative_syntax
+
+    let ( let* ) = ( let* )
+    let ( and* ) = ( and+ )
+  end
 end

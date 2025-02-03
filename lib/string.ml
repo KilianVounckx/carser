@@ -20,6 +20,8 @@ module Stream : StreamType with type t = string and type token = char = struct
 end
 
 include Make (Stream)
+open Operators
+open Monad_syntax
 
 let char expected = satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
 let any_of chars = chars |> List.map char |> choice
