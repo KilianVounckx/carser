@@ -17,7 +17,7 @@ type 's state =
   ; position : position
   }
 
-let state_from_string input = { input; index = 0; position = initial_position }
+let state_from_stream input = { input; index = 0; position = initial_position }
 
 module type StreamType = sig
   type t
@@ -99,7 +99,7 @@ module Make (Stream : StreamType) :
     Printf.fprintf oc "Line:%d Col:%d | Error parsing %s\n%s\n" line column label message
   ;;
 
-  let run parser input = parser.parse (state_from_string input)
+  let run parser input = parser.parse (state_from_stream input)
 
   (* Primitive parsers *)
 
