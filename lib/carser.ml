@@ -204,9 +204,7 @@ module Make (Stream : StreamType) :
     | [] -> const [] <?> "nothing"
     | phead :: ptail ->
       let label =
-        parsers
-        |> List.map (fun parser -> parser.label)
-        |> Stdlib.String.concat " and then "
+        parsers |> List.map (fun parser -> parser.label) |> String.concat " and then "
       in
       (let+ head = phead
        and+ tail = sequence ptail <?> "foo" in
@@ -279,40 +277,34 @@ module Make (Stream : StreamType) :
 end
 
 (* Combined parsers *)
-module String = Make (StringStream)
+module String = struct
+  include Make (StringStream)
 
-let char expected =
-  String.satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
-;;
+  let char expected = satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
+  let any_of chars = chars |> List.map char |> choice
 
-let any_of chars = chars |> List.map char |> String.choice
+  let string string =
+    (let+ chars = string |> String.to_seq |> Seq.map char |> List.of_seq |> sequence in
+     chars |> List.to_seq |> String.of_seq)
+    <?> Printf.sprintf "\"%s\"" string
+  ;;
 
-let string string =
-  let open String in
-  (let+ chars =
-     string |> Stdlib.String.to_seq |> Seq.map char |> List.of_seq |> sequence
-   in
-   chars |> List.to_seq |> Stdlib.String.of_seq)
-  <?> Printf.sprintf "\"%s\"" string
-;;
+  let uint =
+    let digit = satisfy (String.contains "0123456789") "digit" in
+    let+ digits = some digit in
+    digits |> List.to_seq |> String.of_seq |> int_of_string
+  ;;
 
-let uint =
-  let open String in
-  let digit = satisfy (Stdlib.String.contains "0123456789") "digit" in
-  let+ digits = some digit in
-  digits |> List.to_seq |> Stdlib.String.of_seq |> int_of_string
-;;
-
-let int =
-  let open String in
-  (let+ sign =
-     map
-       (Option.value ~default:1)
-       (opt (map (Fun.const (-1)) (char '-') <|> map (Fun.const 1) (char '+')))
-   and+ abs = uint in
-   sign * abs)
-  <?> "int"
-;;
+  let int =
+    (let+ sign =
+       map
+         (Option.value ~default:1)
+         (opt (map (Fun.const (-1)) (char '-') <|> map (Fun.const 1) (char '+')))
+     and+ abs = uint in
+     sign * abs)
+    <?> "int"
+  ;;
+end
 
 (* Tests *)
 
