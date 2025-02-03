@@ -1,0 +1,5 @@
+{0 Carser Documentation }
+
+Carser is a simple parser combinator package.
+
+The main entrypoint is {!Carser}.
