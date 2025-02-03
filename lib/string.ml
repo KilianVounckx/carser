@@ -1,6 +1,6 @@
 open Parser
 
-module StringStream : StreamType with type t = string and type token = char = struct
+module Stream : StreamType with type t = string and type token = char = struct
   type t = string
   type token = char
 
@@ -19,7 +19,7 @@ module StringStream : StreamType with type t = string and type token = char = st
   ;;
 end
 
-include Make (StringStream)
+include Make (Stream)
 
 let char expected = satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
 let any_of chars = chars |> List.map char |> choice
