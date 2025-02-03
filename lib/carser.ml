@@ -29,7 +29,7 @@ module type StreamType = sig
   val pp_token : unit -> token -> string
 end
 
-module String : StreamType with type t = string and type token = char = struct
+module StringStream : StreamType with type t = string and type token = char = struct
   type t = string
   type token = char
 
@@ -279,16 +279,16 @@ module Make (Stream : StreamType) :
 end
 
 (* Combined parsers *)
-module StringParser = Make (String)
+module String = Make (StringStream)
 
 let char expected =
-  StringParser.satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
+  String.satisfy (fun c -> c == expected) (Printf.sprintf "'%c'" expected)
 ;;
 
-let any_of chars = chars |> List.map char |> StringParser.choice
+let any_of chars = chars |> List.map char |> String.choice
 
 let string string =
-  let open StringParser in
+  let open String in
   (let+ chars =
      string |> Stdlib.String.to_seq |> Seq.map char |> List.of_seq |> sequence
    in
@@ -297,14 +297,14 @@ let string string =
 ;;
 
 let uint =
-  let open StringParser in
+  let open String in
   let digit = satisfy (Stdlib.String.contains "0123456789") "digit" in
   let+ digits = some digit in
   digits |> List.to_seq |> Stdlib.String.of_seq |> int_of_string
 ;;
 
 let int =
-  let open StringParser in
+  let open String in
   (let+ sign =
      map
        (Option.value ~default:1)
@@ -319,7 +319,7 @@ let int =
 let pp_parse_result pp_ok oc result =
   match result with
   | Ok (x, rest) -> Printf.fprintf oc "Ok(%a, %a)" pp_ok x pp_position rest.position
-  | Error error -> StringParser.pp_error oc error
+  | Error error -> String.pp_error oc error
 ;;
 
 let pp_list pp_elem oc list =
@@ -343,7 +343,7 @@ let pp_int oc n = Printf.fprintf oc "%d" n
 let pp_char oc c = Printf.fprintf oc "'%c'" c
 
 let%expect_test "a | success" =
-  let open StringParser in
+  let open String in
   let input = "abc" in
   let parse_a = char 'a' in
   let result = run parse_a input in
@@ -352,7 +352,7 @@ let%expect_test "a | success" =
 ;;
 
 let%expect_test "a | fail" =
-  let open StringParser in
+  let open String in
   let input = "zbc" in
   let parse_a = char 'a' in
   let result = run parse_a input in
@@ -365,7 +365,7 @@ let%expect_test "a | fail" =
 ;;
 
 let%expect_test "a | empty" =
-  let open StringParser in
+  let open String in
   let input = "" in
   let parse_a = char 'a' in
   let result = run parse_a input in
@@ -378,7 +378,7 @@ let%expect_test "a | empty" =
 ;;
 
 let%expect_test "a then b | success" =
-  let open StringParser in
+  let open String in
   let input = "abc" in
   let parser = char 'a' *>>* char 'b' in
   let result = run parser input in
@@ -387,7 +387,7 @@ let%expect_test "a then b | success" =
 ;;
 
 let%expect_test "a then b | fail a" =
-  let open StringParser in
+  let open String in
   let input = "zbc" in
   let parser = char 'a' *>>* char 'b' in
   let result = run parser input in
@@ -400,7 +400,7 @@ let%expect_test "a then b | fail a" =
 ;;
 
 let%expect_test "a then b | fail b" =
-  let open StringParser in
+  let open String in
   let input = "azc" in
   let parser = char 'a' *>>* char 'b' in
   let result = run parser input in
@@ -413,7 +413,7 @@ let%expect_test "a then b | fail b" =
 ;;
 
 let%expect_test "a then b | empty" =
-  let open StringParser in
+  let open String in
   let input = "" in
   let parser = char 'a' *>>* char 'b' in
   let result = run parser input in
@@ -426,7 +426,7 @@ let%expect_test "a then b | empty" =
 ;;
 
 let%expect_test "a or b | success a" =
-  let open StringParser in
+  let open String in
   let input = "azz" in
   let parser = char 'a' <|> char 'b' in
   let result = run parser input in
@@ -435,7 +435,7 @@ let%expect_test "a or b | success a" =
 ;;
 
 let%expect_test "a or b | success b" =
-  let open StringParser in
+  let open String in
   let input = "bzz" in
   let parser = char 'a' <|> char 'b' in
   let result = run parser input in
@@ -444,7 +444,7 @@ let%expect_test "a or b | success b" =
 ;;
 
 let%expect_test "a or b | fail" =
-  let open StringParser in
+  let open String in
   let input = "zzz" in
   let parser = char 'a' <|> char 'b' in
   let result = run parser input in
@@ -457,7 +457,7 @@ let%expect_test "a or b | fail" =
 ;;
 
 let%expect_test "a or b | empty" =
-  let open StringParser in
+  let open String in
   let input = "" in
   let parser = char 'a' <|> char 'b' in
   let result = run parser input in
@@ -470,7 +470,7 @@ let%expect_test "a or b | empty" =
 ;;
 
 let%expect_test "a and then (b or c) | success b" =
-  let open StringParser in
+  let open String in
   let input = "abz" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -479,7 +479,7 @@ let%expect_test "a and then (b or c) | success b" =
 ;;
 
 let%expect_test "a and then (b or c) | success c" =
-  let open StringParser in
+  let open String in
   let input = "acz" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -488,7 +488,7 @@ let%expect_test "a and then (b or c) | success c" =
 ;;
 
 let%expect_test "a and then (b or c) | fail a" =
-  let open StringParser in
+  let open String in
   let input = "zcz" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -501,7 +501,7 @@ let%expect_test "a and then (b or c) | fail a" =
 ;;
 
 let%expect_test "a and then (b or c) | fail bc" =
-  let open StringParser in
+  let open String in
   let input = "azz" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -514,7 +514,7 @@ let%expect_test "a and then (b or c) | fail bc" =
 ;;
 
 let%expect_test "a and then (b or c) | empty" =
-  let open StringParser in
+  let open String in
   let input = "" in
   let parser = char 'a' *>>* (char 'b' <|> char 'c') in
   let result = run parser input in
@@ -527,7 +527,7 @@ let%expect_test "a and then (b or c) | empty" =
 ;;
 
 let%expect_test "lowercase | success" =
-  let open StringParser in
+  let open String in
   let input = "aBC" in
   let parser =
     any_of (List.of_seq (Stdlib.String.to_seq "abcdefghijklmnopqrstuvwxyz"))
@@ -539,7 +539,7 @@ let%expect_test "lowercase | success" =
 ;;
 
 let%expect_test "lowercase | fail" =
-  let open StringParser in
+  let open String in
   let input = "ABC" in
   let parser =
     any_of (List.of_seq (Stdlib.String.to_seq "abcdefghijklmnopqrstuvwxyz"))
@@ -555,7 +555,7 @@ let%expect_test "lowercase | fail" =
 ;;
 
 let%expect_test "sequence | success" =
-  let open StringParser in
+  let open String in
   let input = "abcz" in
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = run parser input in
@@ -564,7 +564,7 @@ let%expect_test "sequence | success" =
 ;;
 
 let%expect_test "sequence | fail a" =
-  let open StringParser in
+  let open String in
   let input = "zzzz" in
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = run parser input in
@@ -577,7 +577,7 @@ let%expect_test "sequence | fail a" =
 ;;
 
 let%expect_test "sequence | fail b" =
-  let open StringParser in
+  let open String in
   let input = "azzz" in
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = run parser input in
@@ -590,7 +590,7 @@ let%expect_test "sequence | fail b" =
 ;;
 
 let%expect_test "sequence | fail c" =
-  let open StringParser in
+  let open String in
   let input = "abzz" in
   let parser = sequence [ char 'a'; char 'b'; char 'c' ] in
   let result = run parser input in
@@ -603,7 +603,7 @@ let%expect_test "sequence | fail c" =
 ;;
 
 let%expect_test "string | success" =
-  let open StringParser in
+  let open String in
   let input = "abcz" in
   let parser = string "abc" in
   let result = run parser input in
@@ -612,7 +612,7 @@ let%expect_test "string | success" =
 ;;
 
 let%expect_test "many a | success 3" =
-  let open StringParser in
+  let open String in
   let input = "aaaz" in
   let parser = many (char 'a') in
   let result = run parser input in
@@ -621,7 +621,7 @@ let%expect_test "many a | success 3" =
 ;;
 
 let%expect_test "many a | success 2" =
-  let open StringParser in
+  let open String in
   let input = "aazz" in
   let parser = many (char 'a') in
   let result = run parser input in
@@ -630,7 +630,7 @@ let%expect_test "many a | success 2" =
 ;;
 
 let%expect_test "many a | success 1" =
-  let open StringParser in
+  let open String in
   let input = "azzz" in
   let parser = many (char 'a') in
   let result = run parser input in
@@ -639,7 +639,7 @@ let%expect_test "many a | success 1" =
 ;;
 
 let%expect_test "many a | success 0" =
-  let open StringParser in
+  let open String in
   let input = "zzzz" in
   let parser = many (char 'a') in
   let result = run parser input in
@@ -648,7 +648,7 @@ let%expect_test "many a | success 0" =
 ;;
 
 let%expect_test "some a | success 3" =
-  let open StringParser in
+  let open String in
   let input = "aaaz" in
   let parser = some (char 'a') in
   let result = run parser input in
@@ -657,7 +657,7 @@ let%expect_test "some a | success 3" =
 ;;
 
 let%expect_test "some a | success 2" =
-  let open StringParser in
+  let open String in
   let input = "aazz" in
   let parser = some (char 'a') in
   let result = run parser input in
@@ -666,7 +666,7 @@ let%expect_test "some a | success 2" =
 ;;
 
 let%expect_test "some a | success 1" =
-  let open StringParser in
+  let open String in
   let input = "azzz" in
   let parser = some (char 'a') in
   let result = run parser input in
@@ -675,7 +675,7 @@ let%expect_test "some a | success 1" =
 ;;
 
 let%expect_test "some a | fail" =
-  let open StringParser in
+  let open String in
   let input = "zzzz" in
   let parser = some (char 'a') in
   let result = run parser input in
@@ -688,7 +688,7 @@ let%expect_test "some a | fail" =
 ;;
 
 let%expect_test "int | success 1" =
-  let open StringParser in
+  let open String in
   let input = "1abc" in
   let parser = uint in
   let result = run parser input in
@@ -697,7 +697,7 @@ let%expect_test "int | success 1" =
 ;;
 
 let%expect_test "int | success 12" =
-  let open StringParser in
+  let open String in
   let input = "12bc" in
   let parser = uint in
   let result = run parser input in
@@ -706,7 +706,7 @@ let%expect_test "int | success 12" =
 ;;
 
 let%expect_test "int | success 123" =
-  let open StringParser in
+  let open String in
   let input = "123c" in
   let parser = uint in
   let result = run parser input in
@@ -715,7 +715,7 @@ let%expect_test "int | success 123" =
 ;;
 
 let%expect_test "int | success 1234" =
-  let open StringParser in
+  let open String in
   let input = "1234" in
   let parser = uint in
   let result = run parser input in
@@ -724,7 +724,7 @@ let%expect_test "int | success 1234" =
 ;;
 
 let%expect_test "int | fail" =
-  let open StringParser in
+  let open String in
   let input = "abc" in
   let parser = uint in
   let result = run parser input in
@@ -737,7 +737,7 @@ let%expect_test "int | fail" =
 ;;
 
 let%expect_test "opt | success some" =
-  let open StringParser in
+  let open String in
   let input = "123;" in
   let parser = uint *>>* opt (char ';') in
   let result = run parser input in
@@ -746,7 +746,7 @@ let%expect_test "opt | success some" =
 ;;
 
 let%expect_test "opt | success none" =
-  let open StringParser in
+  let open String in
   let input = "123" in
   let parser = uint *>>* opt (char ';') in
   let result = run parser input in
@@ -755,7 +755,7 @@ let%expect_test "opt | success none" =
 ;;
 
 let%expect_test "int | success positive" =
-  let open StringParser in
+  let open String in
   let input = "123z" in
   let parser = int in
   let result = run parser input in
@@ -764,7 +764,7 @@ let%expect_test "int | success positive" =
 ;;
 
 let%expect_test "int | success negative" =
-  let open StringParser in
+  let open String in
   let input = "-123z" in
   let parser = int in
   let result = run parser input in
@@ -773,7 +773,7 @@ let%expect_test "int | success negative" =
 ;;
 
 let%expect_test "int | fail positive" =
-  let open StringParser in
+  let open String in
   let input = "abcz" in
   let parser = int in
   let result = run parser input in
@@ -786,7 +786,7 @@ let%expect_test "int | fail positive" =
 ;;
 
 let%expect_test "int | fail negative" =
-  let open StringParser in
+  let open String in
   let input = "-abcz" in
   let parser = int in
   let result = run parser input in
@@ -799,7 +799,7 @@ let%expect_test "int | fail negative" =
 ;;
 
 let%expect_test "ignore_right | success" =
-  let open StringParser in
+  let open String in
   let input = "123;" in
   let parser = int *>> char ';' in
   let result = run parser input in
@@ -808,7 +808,7 @@ let%expect_test "ignore_right | success" =
 ;;
 
 let%expect_test "ignore_left | success" =
-  let open StringParser in
+  let open String in
   let input = ";123" in
   let parser = char ';' >>* int in
   let result = run parser input in
@@ -817,7 +817,7 @@ let%expect_test "ignore_left | success" =
 ;;
 
 let%expect_test "between | success" =
-  let open StringParser in
+  let open String in
   let input = "(123)" in
   let parser = between (char '(') (char ')') uint in
   let result = run parser input in
@@ -826,7 +826,7 @@ let%expect_test "between | success" =
 ;;
 
 let%expect_test "sep_by_1 | success 3" =
-  let open StringParser in
+  let open String in
   let input = "1,2,3;" in
   let parser = sep_by_1 (char ',') uint in
   let result = run parser input in
@@ -835,7 +835,7 @@ let%expect_test "sep_by_1 | success 3" =
 ;;
 
 let%expect_test "sep_by_1 | success 2" =
-  let open StringParser in
+  let open String in
   let input = "1,2;" in
   let parser = sep_by_1 (char ',') uint in
   let result = run parser input in
@@ -844,7 +844,7 @@ let%expect_test "sep_by_1 | success 2" =
 ;;
 
 let%expect_test "sep_by_1 | success 1" =
-  let open StringParser in
+  let open String in
   let input = "1,;" in
   let parser = sep_by_1 (char ',') uint in
   let result = run parser input in
@@ -853,7 +853,7 @@ let%expect_test "sep_by_1 | success 1" =
 ;;
 
 let%expect_test "sep_by_1 | fail" =
-  let open StringParser in
+  let open String in
   let input = ";" in
   let parser = sep_by_1 (char ',') uint in
   let result = run parser input in
@@ -866,7 +866,7 @@ let%expect_test "sep_by_1 | fail" =
 ;;
 
 let%expect_test "sep_by | success 3" =
-  let open StringParser in
+  let open String in
   let input = "1,2,3;" in
   let parser = sep_by (char ',') uint in
   let result = run parser input in
@@ -875,7 +875,7 @@ let%expect_test "sep_by | success 3" =
 ;;
 
 let%expect_test "sep_by | success 2" =
-  let open StringParser in
+  let open String in
   let input = "1,2;" in
   let parser = sep_by (char ',') uint in
   let result = run parser input in
@@ -884,7 +884,7 @@ let%expect_test "sep_by | success 2" =
 ;;
 
 let%expect_test "sep_by | success 1" =
-  let open StringParser in
+  let open String in
   let input = "1,;" in
   let parser = sep_by (char ',') uint in
   let result = run parser input in
@@ -893,7 +893,7 @@ let%expect_test "sep_by | success 1" =
 ;;
 
 let%expect_test "sep_by | success 0" =
-  let open StringParser in
+  let open String in
   let input = ";" in
   let parser = sep_by (char ',') uint in
   let result = run parser input in
@@ -902,7 +902,7 @@ let%expect_test "sep_by | success 0" =
 ;;
 
 let%expect_test "bind" =
-  let open StringParser in
+  let open String in
   let input = "{name:frodo,age:50}" in
   let parser =
     let p_name =
